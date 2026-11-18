@@ -1,0 +1,25 @@
+Card Description
+Choose a player and randomly pick one of their cards. They must keep that card facing outward in their hand until it is played or stolen.
+
+"
+Blind
+" Description
+If an opponent marks you while you are blind (or if you become blind while holding a marked card), the marked card must remain facing the opposite direction from the rest of your hand until it is played or stolen.
+
+Mechanics
+Pick a target player. Randomly pick 1 of their cards and 'mark' it by returning the card to their hand facing out to the other players. The card is still part of their hand (and they can look at it), but it must stay marked until it is played or stolen.
+
+If a marked card is stolen, it doesn’t stay marked.
+
+Included In
+Exploding Kittens: Recipes for Disaster
+• 4 cards
+Streaking Kittens: Expansion
+• 3 cards
+Nope
+Mark card CAN be blocked by playing a 
+Nope Card Icon
+Nope
+ card.
+Now
+Mark card CANNOT be played at any time.

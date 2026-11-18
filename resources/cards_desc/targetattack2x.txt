@@ -1,0 +1,24 @@
+Card Description
+Do not draw any cards. Instead, immediately choose ANY OTHER PLAYER to take 2 turns in a row. Play then continues from that player. The victim of this card takes a turn as normal (play-or-pass, then draw). Then, when their turn is over, it’s their turn again.
+
+Mechanics
+Immediately end your turn(s) without drawing a card and choose any player to take 2 turns in a row. The victim of this card takes a turn as normal (play-or-pass then draw). Then, when their first turn is over, it's their turn again. Play then continues from the attacked player.
+
+If the victim of any Attack (Targeted Attack, normal Attack, etc.) plays any Attack card, their turns are immediately over, and the next victim must take any remaining turns plus 2 more; e.g. 4 turns, then 6, and so on.
+
+Included In
+Exploding Kittens: Party Pack Edition
+• 5 cards
+Exploding Kittens: Recipes for Disaster
+• 4 cards
+Exploding Kittens: Good vs. Evil
+• 2 cards
+Imploding Kittens: Expansion
+• 3 cards
+Nope
+Targeted Attack 2x card CAN be blocked by playing a 
+Nope Card Icon
+Nope
+ card.
+Now
+Targeted Attack 2x card CANNOT be played at any time.

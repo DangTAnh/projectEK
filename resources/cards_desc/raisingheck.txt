@@ -1,0 +1,16 @@
+Card Description
+Draw the bottom card from the draw pile. Look at it, and either keep it or put it on the top of the draw pile. This ends your turn.
+
+Mechanics
+Draw the bottom card from the Draw Pile, then decide whether you want to take it into your hand or put it on top of the Draw Pile. Regardless of your decision, this ends your turn.
+
+Included In
+Exploding Kittens: Good vs. Evil
+• 2 cards
+Nope
+Raising Heck card CAN be blocked by playing a 
+Nope Card Icon
+Nope
+ card.
+Now
+Raising Heck card CANNOT be played at any time.

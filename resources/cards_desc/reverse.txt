@@ -1,0 +1,20 @@
+Card Description
+Reverse the order of play and end your turn without drawing a card.
+
+Mechanics
+If there are only two players, this card acts like a Skip card.
+
+If you play this card after you’ve been attacked, the order of play is reversed, but you’ve only ended 1 of your 2 turns.
+
+Included In
+Exploding Kittens: Recipes for Disaster
+• 5 cards
+Imploding Kittens: Expansion
+• 4 cards
+Nope
+Reverse card CAN be blocked by playing a 
+Nope Card Icon
+Nope
+ card.
+Now
+Reverse card CANNOT be played at any time.

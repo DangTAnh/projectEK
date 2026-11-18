@@ -1,0 +1,16 @@
+Card Description
+Draw a card, look at it and then either keep it, or draw the next card (which you must keep) and put the first card facedown on top of the draw pile.
+
+Mechanics
+Draw the top card from the Draw Pile, look at it, and decide if you want to keep it. If so, put it in your hand. Otherwise you MUST draw the next card in the Draw Pile no matter what it is. (Then put the card you decided not to draw back on top of the Draw Pile). Your turn is now over.
+
+Included In
+Exploding Kittens: Zombie Kittens
+• 4 cards
+Nope
+Dig Deeper card CAN be blocked by playing a 
+Nope Card Icon
+Nope
+ card.
+Now
+Dig Deeper card CANNOT be played at any time.

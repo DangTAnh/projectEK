@@ -1,0 +1,47 @@
+Card Description
+Show this card immediately.
+
+"
+Blind
+" Description
+If you draw an Exploding Kitten (and don’t have a Streaking Kitten), that does not count as successfully drawing a card. You must now play cards blindly until you play a Defuse. All non-Defuse Cards played are lost without any effect. After successfully defusing the Exploding Kitten, you can return to non-blind play.
+
+If you play an Exploding Kitten while blind, you explode immediately and must blindly defuse the Exploding Kitten or lose the game.
+
+If you’re the most unlucky person in the world and play an Exploding Kitten while trying to defuse an Exploding Kitten, you must defuse each of them before continuing.
+
+Mechanics
+You must show this card immediately. Unless you have a Defuse Card, you’re dead. Discard all of your cards, including the Exploding Kitten.
+
+ Notes
+
+Streaking Kitten
+
+You may play the Exploding Kitten card from your hand and attempt to Defuse if you are holding both the Streaking Kitten and the Exploding Kitten.
+
+Included In
+Exploding Kittens: Original Edition
+• 4 cards
+Exploding Kittens: NSFW Edition
+• 4 cards
+Exploding Kittens: Cat Burglar Edition
+• 4 cards
+Exploding Kittens: Party Pack Edition
+• 9 cards
+Exploding Kittens: Recipes for Disaster
+• 6 cards
+Exploding Kittens: Good vs. Evil
+• 4 cards
+Exploding Kittens: Zombie Kittens
+• 4 cards
+Exploding Kittens 2-Player Edition
+• 1 card
+Streaking Kittens: Expansion
+• 1 card
+Nope
+Exploding Kitten card CANNOT be blocked by playing a 
+Nope Card Icon
+Nope
+ card.
+Now
+Exploding Kitten card CANNOT be played at any time.

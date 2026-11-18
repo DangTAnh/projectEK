@@ -1,0 +1,18 @@
+Card Description
+Privately view the top five cards of the draw pile.
+
+Mechanics
+Privately view the top 5 cards from the Draw Pile and put them back in the same order. Don’t show the cards to the other players.
+
+Included In
+Exploding Kittens: Recipes for Disaster
+• 3 cards
+Streaking Kittens: Expansion
+• 1 card
+Nope
+See the Future 5x card CAN be blocked by playing a 
+Nope Card Icon
+Nope
+ card.
+Now
+See the Future 5x card CANNOT be played at any time.

@@ -1,0 +1,22 @@
+Card Description
+When you play this card, it becomes whatever card is beneath it.
+
+Mechanics
+Play this card onto the Discard Pile and it becomes whatever card is beneath it and adopts the rules of that card.
+
+You cannot play a Clone on top of another Clone.
+
+You cannot play a Clone Card when it is not your turn or if you are Dead―even if you play it on top of a card with the symbol (because at the time you played it, it was still a Clone Card and can only be played on your turn).
+
+You can play a Cat Card with a Clone to create a pair and steal a card (because the Clone becomes the same card as the Cat Card you put beneath it). This only works if you are the player who played both the Cat Card AND the Clone ― you could not play a Clone on top of a Cat Card played by another player!
+
+Included In
+Exploding Kittens: Zombie Kittens
+• 3 cards
+Nope
+Clone card CAN be blocked by playing a 
+Nope Card Icon
+Nope
+ card.
+Now
+Clone card CANNOT be played at any time.

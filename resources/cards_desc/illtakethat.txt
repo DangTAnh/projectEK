@@ -1,0 +1,29 @@
+Card Description
+Put this card in front of another player to steal the next card they draw from the pile.
+
+"
+Blind
+" Description
+If an I’ll Take That Card is played on you while you are blind, you may look at the card you draw before giving it away as usual. Then you will become unblinded because you have successfully drawn a card (even if the card you gave away was an Exploding Kitten).
+
+If you are blind and receive a card from an I’ll Take That, follow the rules of playing a Favor Card while blind.
+
+Mechanics
+Play this card face-up in front of another player. The next time they draw a card, they must secretly view it and hand it to you.
+
+If they hand you an Exploding Kitten, you must Defuse it or explode. Play continues as if that player had drawn a card and ended their turn.
+
+You cannot play this card in front of a player who already has one in front of them.
+
+Included In
+Exploding Kittens: Recipes for Disaster
+• 4 cards
+Barking Kittens: Expansion
+• 4 cards
+Nope
+I'll Take That card CAN be blocked by playing a 
+Nope Card Icon
+Nope
+ card.
+Now
+I'll Take That card CANNOT be played at any time.

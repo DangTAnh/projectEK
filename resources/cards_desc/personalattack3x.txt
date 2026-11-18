@@ -1,0 +1,20 @@
+Card Description
+Take three turns in a row.
+
+Mechanics
+This Attack is played on yourself. Take three turns in a row. Take your first turn as normal (play-or-pass then draw). Then, when your turn is over, it’s your turn two more times.
+
+If you play another Attack Card (Personal Attack, Normal Attack, etc.) on any of your turns, your target must take any of your remaining turns plus the number of attacks on the Attack Card just played.
+
+Included In
+Exploding Kittens: Recipes for Disaster
+• 4 cards
+Barking Kittens: Expansion
+• 4 cards
+Nope
+Personal Attack 3x card CAN be blocked by playing a 
+Nope Card Icon
+Nope
+ card.
+Now
+Personal Attack 3x card CANNOT be played at any time.

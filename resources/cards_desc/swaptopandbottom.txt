@@ -1,0 +1,18 @@
+Card Description
+Swap the top and bottom cards of the draw pile.
+
+Mechanics
+Swap the top and bottom cards of the Draw Pile without looking.
+
+Included In
+Exploding Kittens: Recipes for Disaster
+• 3 cards
+Streaking Kittens: Expansion
+• 3 cards
+Nope
+Swap Top and Bottom card CAN be blocked by playing a 
+Nope Card Icon
+Nope
+ card.
+Now
+Swap Top and Bottom card CANNOT be played at any time.

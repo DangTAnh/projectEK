@@ -1,0 +1,28 @@
+Card Description
+Shuffle the draw pile.
+
+Mechanics
+Shuffle the Draw Pile without viewing the cards until told to stop.
+
+Included In
+Exploding Kittens: Original Edition
+• 4 cards
+Exploding Kittens: NSFW Edition
+• 4 cards
+Exploding Kittens: Cat Burglar Edition
+• 4 cards
+Exploding Kittens: Party Pack Edition
+• 6 cards
+Exploding Kittens: Recipes for Disaster
+• 5 cards
+Exploding Kittens: Good vs. Evil
+• 2 cards
+Exploding Kittens 2-Player Edition
+• 2 cards
+Nope
+Shuffle card CAN be blocked by playing a 
+Nope Card Icon
+Nope
+ card.
+Now
+Shuffle card CANNOT be played at any time.

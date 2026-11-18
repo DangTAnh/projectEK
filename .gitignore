@@ -1,0 +1,19 @@
+# Python
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.cache/
+.pythonlibs/
+.local/
+.upm/
+
+# Node / Vite
+web/node_modules/
+web/dist/
+
+# Ảnh chụp/debug tay, không phải mã sản phẩm
+tmp_shots/
+
+# OS / editor
+.DS_Store
+Thumbs.db

@@ -1,0 +1,20 @@
+Card Description
+Remove the Exploding Kittens from the Deck. Shuffle the deck. Put all those kittens face down on top. Your turn ends after playing this card.
+
+Mechanics
+Remove all the Exploding Kittens (leave Imploding Kitten) from the Draw Pile so that everyone can see them. Then, shuffle the Draw Pile, and return the Exploding Kittens face down on top.
+
+End your turn without drawing a card.
+
+Included In
+Exploding Kittens: Recipes for Disaster
+• 1 card
+Streaking Kittens: Expansion
+• 1 card
+Nope
+Catomic Bomb card CAN be blocked by playing a 
+Nope Card Icon
+Nope
+ card.
+Now
+Catomic Bomb card CANNOT be played at any time.

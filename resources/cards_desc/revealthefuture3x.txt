@@ -1,0 +1,16 @@
+Card Description
+Show everyone the top three cards.
+
+Mechanics
+Reveal the top three cards of the Draw Pile to ALL players, then put them back without changing their order.
+
+Included In
+Exploding Kittens: Good vs. Evil
+• 3 cards
+Nope
+Reveal the Future 3x card CAN be blocked by playing a 
+Nope Card Icon
+Nope
+ card.
+Now
+Reveal the Future 3x card CANNOT be played at any time.

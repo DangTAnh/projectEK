@@ -1,0 +1,25 @@
+Card Description
+Every player (Including the one who played this card) must choose one card to shuffle into the draw pile.
+
+"
+Blind
+" Description
+If Garbage Collection is played while you are blind, you must pick a card to contribute without looking at your cards. After you have made your selection, you may secretly view the card (so that if you’ve accidentally given up a Streaking Kitten and you’re left with an Exploding Kitten in your hand, you can try to defuse it).
+
+Mechanics
+Every player who has cards (including the player who played this card) must choose 1 card from their hand to secretly insert into the Draw Pile. Then, shuffle the entire Draw Pile.
+
+If you have an Exploding Kitten in your hand (see “Streaking Kitten”), you can use it as your chosen card when Garbage Collection is played.
+
+Included In
+Exploding Kittens: Recipes for Disaster
+• 2 cards
+Streaking Kittens: Expansion
+• 1 card
+Nope
+Garbage Collection card CAN be blocked by playing a 
+Nope Card Icon
+Nope
+ card.
+Now
+Garbage Collection card CANNOT be played at any time.

@@ -1,0 +1,18 @@
+Card Description
+Pick a dead player. All living players (except you) must choose one card from their hand to give to them. Play at any time.
+
+Mechanics
+Pick a Dead player. All Living players with cards (except you) must pick a card of their choice and give it to that player. You cannot play this card if there are no Dead players.
+
+You can play this at any time before an action has begun, even if it is not your turn. Dead players can also play this card.
+
+Included In
+Exploding Kittens: Zombie Kittens
+• 2 cards
+Nope
+Feed The Dead card CAN be blocked by playing a 
+Nope Card Icon
+Nope
+ card.
+Now
+Feed The Dead card CAN be played at any time and it does not affect whose turn it is.

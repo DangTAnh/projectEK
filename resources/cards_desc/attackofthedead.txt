@@ -1,0 +1,20 @@
+Card Description
+Do not draw any cards. Force the next player to take three turns for each dead player.
+
+Mechanics
+End your turn without drawing a card. Force the next player to take three turns for each Dead player.
+
+If the victim of an Attack Card plays an Attack Card on any of their turns, the new target must take any remaining turns plus the number of attacks on the Attack Card just played.
+
+You cannot play this card if there are no Dead players.
+
+Included In
+Exploding Kittens: Zombie Kittens
+• 3 cards
+Nope
+Attack of the Dead card CAN be blocked by playing a 
+Nope Card Icon
+Nope
+ card.
+Now
+Attack of the Dead card CANNOT be played at any time.
