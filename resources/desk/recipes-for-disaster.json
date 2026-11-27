@@ -1,0 +1,160 @@
+{
+  "name": "recipes-for-disaster",
+  "title": "Exploding Kittens: Recipes for Disaster",
+  "deck_type": "Standalone",
+  "base_merged": false,
+  "card_count": 121,
+  "description": "It includes a curated deck of 121 of our favorite cards from Exploding Kittens and all of its expansions plus a new rendition of the beloved Cone of Shame.",
+  "theme_color": "#00152e",
+  "source_url": "https://explodi.ng/decks/exploding-kittens-recipes-for-disaster",
+  "cards": {
+    "alter3x": {
+      "0": 1,
+      "1": 1,
+      "2": 1
+    },
+    "alter3xnow": {
+      "0": 2
+    },
+    "attack2x": {
+      "0": 1,
+      "1": 1,
+      "2": 1,
+      "3": 1,
+      "4": 1,
+      "5": 1
+    },
+    "barkingkitten": {
+      "0": 1,
+      "1": 1
+    },
+    "bury": {
+      "0": 2,
+      "1": 2
+    },
+    "cat": {
+      "0": 1,
+      "1": 1,
+      "2": 1,
+      "3": 1,
+      "4": 1,
+      "5": 1,
+      "6": 1,
+      "7": 1,
+      "9": 1,
+      "10": 1,
+      "11": 1,
+      "12": 1,
+      "13": 1,
+      "14": 1,
+      "15": 1,
+      "16": 1
+    },
+    "catomicbomb": {
+      "0": 1
+    },
+    "defuse": {
+      "0": 1,
+      "1": 1,
+      "2": 1,
+      "3": 1,
+      "4": 1,
+      "5": 1,
+      "6": 1,
+      "7": 1
+    },
+    "drawfromthebottom": {
+      "0": 3
+    },
+    "explodingkitten": {
+      "0": 1,
+      "1": 1,
+      "2": 1,
+      "3": 1,
+      "4": 1,
+      "5": 1
+    },
+    "feralcat": {
+      "0": 6
+    },
+    "garbagecollection": {
+      "0": 2
+    },
+    "illtakethat": {
+      "0": 1,
+      "1": 1,
+      "2": 1,
+      "3": 1
+    },
+    "implodingkitten": {
+      "0": 4
+    },
+    "mark": {
+      "0": 4
+    },
+    "nope": {
+      "0": 1,
+      "1": 1,
+      "2": 1,
+      "3": 1,
+      "4": 1,
+      "5": 1,
+      "6": 1,
+      "7": 1
+    },
+    "personalattack3x": {
+      "0": 1,
+      "1": 1,
+      "2": 1,
+      "3": 1
+    },
+    "reverse": {
+      "0": 2,
+      "1": 1,
+      "2": 1,
+      "3": 1
+    },
+    "seethefuture3x": {
+      "0": 2,
+      "1": 2,
+      "2": 1,
+      "3": 1
+    },
+    "seethefuture5x": {
+      "0": 3
+    },
+    "sharethefuture3x": {
+      "0": 2,
+      "1": 2
+    },
+    "shuffle": {
+      "0": 1,
+      "1": 1,
+      "2": 1,
+      "3": 1,
+      "4": 1
+    },
+    "skip": {
+      "0": 1,
+      "1": 1,
+      "2": 1,
+      "3": 1,
+      "4": 1
+    },
+    "streakingkitten": {
+      "0": 1
+    },
+    "superskip": {
+      "0": 1,
+      "1": 1
+    },
+    "swaptopandbottom": {
+      "0": 3
+    },
+    "targetattack2x": {
+      "0": 2,
+      "1": 1,
+      "2": 1
+    }
+  }
+}

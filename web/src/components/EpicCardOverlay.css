@@ -1,0 +1,1284 @@
+/* ══════════════════════════════════════════════════════════
+   EpicCardOverlay — Full-Screen 60fps Legendary Card Cutscenes
+   Strict GPU performance rules:
+   - Animate ONLY transform (translate3d / rotate / scale) and opacity
+   - ZERO backdrop-filter: blur()
+   - ZERO mix-blend-mode: screen
+   - ZERO multi-pass drop-shadow filters
+   - contain: layout style paint + pointer-events: none
+   - @media (prefers-reduced-motion: reduce) fallback
+   ══════════════════════════════════════════════════════════ */
+
+.epic-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: var(--z-boom, 95);
+  pointer-events: none;
+  overflow: hidden;
+  display: grid;
+  place-items: center;
+  contain: layout style paint;
+}
+
+.epic-overlay .ep-backdrop {
+  position: absolute;
+  inset: 0;
+  will-change: opacity;
+}
+
+/* Shared card frame & image helpers */
+.epic-overlay .ep-card-frame {
+  width: clamp(132px, 21vmin, 200px);
+  aspect-ratio: 5 / 7;
+  border-radius: 14px;
+  overflow: hidden;
+  background: #141218;
+  will-change: transform, opacity;
+}
+
+.epic-overlay .ep-card-img,
+.epic-overlay .ep-prop-img {
+  width: 100%;
+  height: 100%;
+  display: block;
+  object-fit: cover;
+}
+
+.epic-overlay .ep-prop-img {
+  object-fit: contain;
+}
+
+.epic-overlay .ep-flip-x {
+  transform: scaleX(-1);
+}
+
+/* Shared particle containers */
+.epic-overlay .ep-radial-particles {
+  position: absolute;
+  left: 50%;
+  top: 46%;
+  width: 0;
+  height: 0;
+  z-index: 4;
+}
+
+.epic-overlay .ep-spark {
+  position: absolute;
+  left: 0;
+  top: 0;
+  width: var(--size);
+  height: max(2.5px, calc(var(--size) * 0.16));
+  border-radius: 999px;
+  opacity: 0;
+  background: linear-gradient(90deg, transparent 0%, var(--pcol) 45%, #ffffff 100%);
+  box-shadow: 0 0 8px var(--pcol);
+  animation: ep-radial-spark var(--dur) cubic-bezier(0.12, 0.84, 0.24, 1) var(--delay) forwards;
+}
+
+@keyframes ep-radial-spark {
+  0% {
+    opacity: 0;
+    transform: translate3d(-50%, -50%, 0) rotate(var(--rot)) scale3d(0.25, 0.8, 1);
+  }
+  14% {
+    opacity: 1;
+    transform: translate3d(calc(-50% + var(--tx) * 0.3), calc(-50% + var(--ty) * 0.3), 0)
+      rotate(var(--rot)) scale3d(1.25, 1, 1);
+  }
+  68% {
+    opacity: 0.82;
+    transform: translate3d(calc(-50% + var(--tx) * 0.86), calc(-50% + var(--ty) * 0.86), 0)
+      rotate(var(--rot)) scale3d(0.85, 0.75, 1);
+  }
+  100% {
+    opacity: 0;
+    transform: translate3d(calc(-50% + var(--tx)), calc(-50% + var(--ty)), 0)
+      rotate(var(--rot)) scale3d(0.2, 0.4, 1);
+  }
+}
+
+.epic-overlay .ep-mote {
+  position: absolute;
+  left: 0;
+  top: 0;
+  width: var(--size);
+  height: var(--size);
+  border-radius: 50%;
+  opacity: 0;
+  background: radial-gradient(circle, #ffffff 0%, var(--pcol) 62%, transparent 100%);
+  box-shadow: 0 0 8px var(--pcol);
+  animation: ep-radial-mote var(--dur) cubic-bezier(0.16, 0.8, 0.3, 1) var(--delay) forwards;
+}
+
+@keyframes ep-radial-mote {
+  0% {
+    opacity: 0;
+    transform: translate3d(-50%, -50%, 0) scale(0.25);
+  }
+  18% {
+    opacity: 1;
+    transform: translate3d(calc(-50% + var(--tx) * 0.35), calc(-50% + var(--ty) * 0.35), 0) scale(1.15);
+  }
+  72% {
+    opacity: 0.8;
+    transform: translate3d(calc(-50% + var(--tx) * 0.88), calc(-50% + var(--ty) * 0.88), 0) scale(0.82);
+  }
+  100% {
+    opacity: 0;
+    transform: translate3d(calc(-50% + var(--tx)), calc(-50% + var(--ty)), 0) scale(0.2);
+  }
+}
+
+.epic-overlay .ep-rising-particles {
+  position: absolute;
+  inset: 0;
+  z-index: 4;
+}
+
+.epic-overlay .ep-rise {
+  position: absolute;
+  bottom: -6%;
+  opacity: 0;
+}
+
+.epic-overlay .ep-rise-spark {
+  width: 3px;
+  height: var(--size);
+  border-radius: 999px;
+  background: linear-gradient(180deg, #ffffff 0%, var(--pcol) 55%, transparent 100%);
+  box-shadow: 0 0 8px var(--pcol);
+  animation: ep-rise-up var(--dur) cubic-bezier(0.16, 0.72, 0.34, 1) var(--delay) forwards;
+}
+
+.epic-overlay .ep-rise-ember,
+.epic-overlay .ep-rise-wisp {
+  width: var(--size);
+  height: var(--size);
+  border-radius: 50%;
+  background: radial-gradient(circle, #ffffff 0%, var(--pcol) 58%, transparent 100%);
+  box-shadow: 0 0 8px var(--pcol);
+  animation: ep-rise-up var(--dur) cubic-bezier(0.16, 0.72, 0.34, 1) var(--delay) forwards;
+}
+
+@keyframes ep-rise-up {
+  0% {
+    opacity: 0;
+    transform: translate3d(0, 0, 0) scale(0.45);
+  }
+  18% {
+    opacity: 0.95;
+    transform: translate3d(calc(var(--drift) * 0.25), -22vh, 0) scale(1.1);
+  }
+  74% {
+    opacity: 0.82;
+    transform: translate3d(calc(var(--drift) * 0.82), -80vh, 0) scale(0.85);
+  }
+  100% {
+    opacity: 0;
+    transform: translate3d(var(--drift), -112vh, 0) scale(0.25);
+  }
+}
+
+/* Shared centerpiece banner typography */
+.epic-overlay .ep-banner {
+  position: relative;
+  z-index: 7;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  text-align: center;
+  padding: 0 20px;
+  margin-top: clamp(120px, 24vmin, 210px);
+  max-width: min(92vw, 820px);
+  will-change: transform, opacity;
+}
+
+.epic-overlay .ep-eyebrow {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  padding: 5px 15px;
+  margin-bottom: 6px;
+  border-radius: 999px;
+  font-family: var(--font-body, system-ui, sans-serif);
+  font-size: 11.5px;
+  font-weight: 800;
+  letter-spacing: 2.2px;
+  text-transform: uppercase;
+  box-shadow: 0 6px 18px rgba(0, 0, 0, 0.55);
+}
+
+.epic-overlay .ep-title {
+  font-family: var(--font-display, 'Baloo 2', system-ui, sans-serif);
+  font-size: clamp(44px, 9.5vw, 108px);
+  font-weight: 800;
+  line-height: 0.95;
+  letter-spacing: 0.04em;
+  text-shadow: 0 6px 16px rgba(0, 0, 0, 0.85);
+}
+
+.epic-overlay .ep-subtitle {
+  margin-top: 10px;
+  padding: 7px 18px;
+  border-radius: 999px;
+  font-family: var(--font-body, system-ui, sans-serif);
+  font-size: clamp(11px, 1.8vw, 14px);
+  font-weight: 800;
+  letter-spacing: 1.5px;
+  text-transform: uppercase;
+  box-shadow: 0 8px 20px rgba(0, 0, 0, 0.6);
+}
+
+@media (max-width: 600px) {
+  .epic-overlay .ep-banner {
+    margin-top: clamp(110px, 24vh, 185px);
+  }
+  .epic-overlay .ep-eyebrow {
+    font-size: 10px;
+    letter-spacing: 1.5px;
+    padding: 4px 12px;
+  }
+  .epic-overlay .ep-subtitle {
+    padding: 6px 13px;
+    letter-spacing: 1px;
+    border-radius: 14px;
+  }
+}
+
+/* ══════════════════════════════════════════════════════════
+   1. ARMAGEDDON (2400ms) — Split Heaven-vs-Hell Eclipse
+   ══════════════════════════════════════════════════════════ */
+
+.epic-armageddon .ep-arma-backdrop {
+  background: rgba(6, 4, 10, 0.9);
+  animation: ep-fade-2400 2.4s cubic-bezier(0.22, 1, 0.36, 1) forwards;
+}
+
+.epic-armageddon .ep-arma-heaven {
+  position: absolute;
+  inset: 0;
+  clip-path: polygon(0 0, 100% 0, 0 100%);
+  background:
+    radial-gradient(circle at 26% 24%, rgba(255, 245, 196, 0.56) 0%, rgba(245, 180, 42, 0.34) 44%, rgba(28, 18, 6, 0.72) 86%);
+  will-change: transform, opacity;
+  animation: ep-arma-half-in 2.4s cubic-bezier(0.18, 0.88, 0.28, 1) forwards;
+}
+
+.epic-armageddon .ep-arma-hell {
+  position: absolute;
+  inset: 0;
+  clip-path: polygon(100% 0, 100% 100%, 0 100%);
+  background:
+    radial-gradient(circle at 74% 76%, rgba(255, 72, 42, 0.58) 0%, rgba(180, 14, 28, 0.42) 44%, rgba(16, 2, 6, 0.8) 88%);
+  will-change: transform, opacity;
+  animation: ep-arma-half-in 2.4s cubic-bezier(0.18, 0.88, 0.28, 1) forwards;
+}
+
+.epic-armageddon .ep-arma-seam {
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  width: 160vmax;
+  height: 4px;
+  background: linear-gradient(90deg, transparent 0%, #fff4cc 28%, #ffffff 50%, #ff5e3a 72%, transparent 100%);
+  box-shadow: 0 0 18px rgba(255, 210, 110, 0.75);
+  transform: translate3d(-50%, -50%, 0) rotate(-45deg);
+  will-change: transform, opacity;
+  animation: ep-arma-seam-pulse 2.4s cubic-bezier(0.16, 0.84, 0.3, 1) forwards;
+}
+
+@keyframes ep-arma-half-in {
+  0% { opacity: 0; transform: scale(1.06); }
+  12% { opacity: 1; transform: scale(1); }
+  82% { opacity: 1; transform: scale(1); }
+  100% { opacity: 0; transform: scale(1.04); }
+}
+
+@keyframes ep-arma-seam-pulse {
+  0% { opacity: 0; transform: translate3d(-50%, -50%, 0) rotate(-45deg) scaleX(0.15); }
+  18% { opacity: 0.85; transform: translate3d(-50%, -50%, 0) rotate(-45deg) scaleX(1); }
+  45% { opacity: 0.45; transform: translate3d(-50%, -50%, 0) rotate(-45deg) scaleX(1.06); }
+  100% { opacity: 0; transform: translate3d(-50%, -50%, 0) rotate(-45deg) scaleX(1.1); }
+}
+
+.epic-armageddon .ep-arma-ring {
+  position: absolute;
+  left: 50%;
+  top: 42%;
+  width: 22vmin;
+  height: 22vmin;
+  border-radius: 50%;
+  opacity: 0;
+  will-change: transform, opacity;
+}
+
+.epic-armageddon .ep-arma-ring.r1 {
+  border: 3px dashed #ffe48f;
+  box-shadow: 0 0 18px rgba(255, 200, 66, 0.72);
+  animation: ep-arma-ring-spin 1.45s cubic-bezier(0.14, 0.84, 0.26, 1) 0.2s forwards;
+}
+
+.epic-armageddon .ep-arma-ring.r2 {
+  border: 2.5px solid #ff424e;
+  box-shadow: 0 0 18px rgba(255, 58, 72, 0.72);
+  animation: ep-arma-ring-counter 1.55s cubic-bezier(0.14, 0.84, 0.26, 1) 0.26s forwards;
+}
+
+@keyframes ep-arma-ring-spin {
+  0% { opacity: 0; transform: translate3d(-50%, -50%, 0) scale(0.2) rotate(0deg); }
+  15% { opacity: 0.95; transform: translate3d(-50%, -50%, 0) scale(1.1) rotate(35deg); }
+  100% { opacity: 0; transform: translate3d(-50%, -50%, 0) scale(4.2) rotate(180deg); }
+}
+
+@keyframes ep-arma-ring-counter {
+  0% { opacity: 0; transform: translate3d(-50%, -50%, 0) scale(0.2) rotate(0deg); }
+  15% { opacity: 0.9; transform: translate3d(-50%, -50%, 0) scale(1.05) rotate(-30deg); }
+  100% { opacity: 0; transform: translate3d(-50%, -50%, 0) scale(4.6) rotate(-160deg); }
+}
+
+.epic-armageddon .ep-arma-eclipse-core {
+  position: absolute;
+  left: 50%;
+  top: 42%;
+  width: 24vmin;
+  height: 24vmin;
+  border-radius: 50%;
+  background: radial-gradient(circle, #09050c 46%, #fff3c4 56%, #ff5436 74%, transparent 100%);
+  box-shadow: 0 0 26px rgba(255, 168, 60, 0.75);
+  opacity: 0;
+  will-change: transform, opacity;
+  animation: ep-arma-eclipse 2.4s cubic-bezier(0.16, 0.88, 0.28, 1) forwards;
+}
+
+@keyframes ep-arma-eclipse {
+  0%, 16% { opacity: 0; transform: translate3d(-50%, -50%, 0) scale(0.35); }
+  26% { opacity: 1; transform: translate3d(-50%, -50%, 0) scale(1.25); }
+  66% { opacity: 0.82; transform: translate3d(-50%, -50%, 0) scale(1.45); }
+  100% { opacity: 0; transform: translate3d(-50%, -50%, 0) scale(1.9); }
+}
+
+.epic-armageddon .ep-arma-clash-stage {
+  position: absolute;
+  left: 50%;
+  top: 40%;
+  width: 0;
+  height: 0;
+  z-index: 3;
+}
+
+.epic-armageddon .ep-arma-god {
+  position: absolute;
+  border: 2.5px solid #ffe48f;
+  box-shadow: 0 0 22px rgba(255, 210, 74, 0.78);
+  animation: ep-arma-god-clash 2.4s cubic-bezier(0.16, 0.88, 0.28, 1) forwards;
+}
+
+.epic-armageddon .ep-arma-devil {
+  position: absolute;
+  border: 2.5px solid #ff424e;
+  box-shadow: 0 0 22px rgba(255, 48, 68, 0.78);
+  animation: ep-arma-devil-clash 2.4s cubic-bezier(0.16, 0.88, 0.28, 1) forwards;
+}
+
+@keyframes ep-arma-god-clash {
+  0% { opacity: 0; transform: translate3d(-175%, -115%, 0) rotate(-22deg) scale(0.75); }
+  18% { opacity: 1; transform: translate3d(-92%, -54%, 0) rotate(-10deg) scale(1.04); }
+  27% { opacity: 1; transform: translate3d(-72%, -50%, 0) rotate(-6deg) scale(1.06); }
+  78% { opacity: 1; transform: translate3d(-84%, -52%, 0) rotate(-8deg) scale(1); }
+  100% { opacity: 0; transform: translate3d(-110%, -72%, 0) rotate(-14deg) scale(0.88); }
+}
+
+@keyframes ep-arma-devil-clash {
+  0% { opacity: 0; transform: translate3d(75%, 15%, 0) rotate(22deg) scale(0.75); }
+  18% { opacity: 1; transform: translate3d(-8%, -46%, 0) rotate(10deg) scale(1.04); }
+  27% { opacity: 1; transform: translate3d(-28%, -50%, 0) rotate(6deg) scale(1.06); }
+  78% { opacity: 1; transform: translate3d(-16%, -48%, 0) rotate(8deg) scale(1); }
+  100% { opacity: 0; transform: translate3d(10%, -28%, 0) rotate(14deg) scale(0.88); }
+}
+
+.epic-armageddon .ep-arma-flash {
+  position: absolute;
+  inset: 0;
+  z-index: 5;
+  background: radial-gradient(
+    circle at 50% 42%,
+    rgba(255, 255, 255, 0.92) 0%,
+    rgba(255, 232, 162, 0.65) 22%,
+    rgba(255, 76, 48, 0.32) 48%,
+    transparent 76%
+  );
+  opacity: 0;
+  will-change: transform, opacity;
+  animation: ep-arma-eclipse-flash 2.4s cubic-bezier(0.16, 1, 0.3, 1) forwards;
+}
+
+@keyframes ep-arma-eclipse-flash {
+  0%, 19% { opacity: 0; transform: scale(0.5); }
+  25% { opacity: 0.96; transform: scale(1.05); }
+  36% { opacity: 0.38; transform: scale(1.18); }
+  48%, 100% { opacity: 0; transform: scale(1.28); }
+}
+
+.epic-banner-armageddon,
+.epic-armageddon .ep-banner-armageddon {
+  animation: ep-banner-2400 2.4s cubic-bezier(0.18, 0.9, 0.25, 1) forwards;
+}
+
+.epic-armageddon .ep-eyebrow {
+  background: rgba(24, 10, 14, 0.92);
+  border: 1px solid rgba(255, 210, 96, 0.56);
+  color: #fff1c2;
+}
+
+.epic-armageddon .ep-title {
+  color: #fff6d6;
+  text-shadow:
+    0 4px 12px rgba(0, 0, 0, 0.9),
+    0 0 24px rgba(255, 158, 52, 0.72);
+}
+
+.epic-armageddon .ep-subtitle {
+  background: rgba(24, 10, 14, 0.92);
+  border: 1px solid rgba(255, 84, 72, 0.56);
+  color: #ffe3b8;
+}
+
+/* ══════════════════════════════════════════════════════════
+   2. TOWER OF POWER (2250ms) — Royal Coronation
+   ══════════════════════════════════════════════════════════ */
+
+.epic-towerofpower .ep-tower-backdrop {
+  background:
+    radial-gradient(circle at 50% 42%, rgba(16, 140, 94, 0.44) 0%, rgba(10, 38, 28, 0.78) 48%, rgba(4, 10, 8, 0.92) 100%);
+  animation: ep-fade-2250 2.25s cubic-bezier(0.22, 1, 0.36, 1) forwards;
+}
+
+.epic-towerofpower .ep-tower-rays {
+  position: absolute;
+  left: 50%;
+  top: 42%;
+  width: 92vmin;
+  height: 92vmin;
+  border-radius: 50%;
+  background:
+    repeating-conic-gradient(
+      from 0deg,
+      rgba(255, 232, 138, 0.36) 0deg 5deg,
+      transparent 5deg 18deg,
+      rgba(52, 211, 153, 0.26) 18deg 24deg,
+      transparent 24deg 36deg
+    );
+  -webkit-mask-image: radial-gradient(circle, rgba(0, 0, 0, 0.92) 0%, rgba(0, 0, 0, 0.45) 42%, transparent 72%);
+  mask-image: radial-gradient(circle, rgba(0, 0, 0, 0.92) 0%, rgba(0, 0, 0, 0.45) 42%, transparent 72%);
+  will-change: transform, opacity;
+  animation: ep-tower-rays-spin 2.25s cubic-bezier(0.16, 0.85, 0.28, 1) forwards;
+}
+
+@keyframes ep-tower-rays-spin {
+  0% { opacity: 0; transform: translate3d(-50%, -50%, 0) scale(0.4) rotate(0deg); }
+  16% { opacity: 0.92; transform: translate3d(-50%, -50%, 0) scale(1.08) rotate(12deg); }
+  80% { opacity: 0.72; transform: translate3d(-50%, -50%, 0) scale(1.3) rotate(38deg); }
+  100% { opacity: 0; transform: translate3d(-50%, -50%, 0) scale(1.45) rotate(48deg); }
+}
+
+.epic-towerofpower .ep-tower-orbit {
+  position: absolute;
+  left: 50%;
+  top: 40%;
+  width: 0;
+  height: 0;
+  z-index: 2;
+  will-change: transform, opacity;
+  animation: ep-tower-ring-spin 2.25s cubic-bezier(0.2, 0.84, 0.3, 1) forwards;
+}
+
+@keyframes ep-tower-ring-spin {
+  0% { opacity: 0; transform: scale(0.35) rotate(-40deg); }
+  20% { opacity: 1; transform: scale(1) rotate(0deg); }
+  80% { opacity: 1; transform: scale(1.06) rotate(42deg); }
+  100% { opacity: 0; transform: scale(0.86) rotate(68deg); }
+}
+
+.epic-towerofpower .ep-tower-stash-slot {
+  position: absolute;
+  left: 0;
+  top: 0;
+  opacity: 0;
+  animation: ep-tower-stash-pop 2.1s cubic-bezier(0.18, 0.88, 0.28, 1) var(--delay) forwards;
+}
+
+@keyframes ep-tower-stash-pop {
+  0% { opacity: 0; transform: translate3d(-50%, -50%, 0) scale(0.3) rotate(var(--rot)); }
+  24% { opacity: 1; transform: translate3d(calc(-50% + var(--tx)), calc(-50% + var(--ty)), 0) scale(1) rotate(var(--rot)); }
+  82% { opacity: 0.95; transform: translate3d(calc(-50% + var(--tx)), calc(-50% + var(--ty)), 0) scale(1) rotate(var(--rot)); }
+  100% { opacity: 0; transform: translate3d(calc(-50% + var(--tx) * 1.1), calc(-50% + var(--ty) * 1.1), 0) scale(0.6) rotate(var(--rot)); }
+}
+
+.epic-towerofpower .ep-tower-stash-card {
+  width: clamp(54px, 8.5vmin, 82px);
+  aspect-ratio: 5 / 7;
+  border-radius: 8px;
+  overflow: hidden;
+  border: 2px solid #ffd54f;
+  box-shadow: 0 0 14px rgba(255, 208, 64, 0.68);
+  background: #1a160c;
+}
+
+.epic-towerofpower .ep-tower-center {
+  position: absolute;
+  left: 50%;
+  top: 40%;
+  width: 0;
+  height: 0;
+  z-index: 3;
+}
+
+.epic-towerofpower .ep-tower-card {
+  position: absolute;
+  border: 2.5px solid #ffd54f;
+  box-shadow: 0 0 24px rgba(255, 208, 64, 0.75);
+  animation: ep-card-reveal-2250 2.25s cubic-bezier(0.18, 0.9, 0.26, 1) forwards;
+}
+
+.epic-towerofpower .ep-tower-crown {
+  position: absolute;
+  left: 0;
+  top: 0;
+  width: clamp(68px, 11vmin, 108px);
+  height: clamp(68px, 11vmin, 108px);
+  z-index: 4;
+  will-change: transform, opacity;
+  animation: ep-crown-descend 2.25s cubic-bezier(0.18, 0.9, 0.26, 1) forwards;
+}
+
+@keyframes ep-crown-descend {
+  0% { opacity: 0; transform: translate3d(-50%, -260%, 0) scale(1.3) rotate(-10deg); }
+  22% { opacity: 1; transform: translate3d(-50%, -142%, 0) scale(1.06) rotate(4deg); }
+  34% { opacity: 1; transform: translate3d(-50%, -148%, 0) scale(1) rotate(0deg); }
+  80% { opacity: 1; transform: translate3d(-50%, -148%, 0) scale(1.02) rotate(0deg); }
+  100% { opacity: 0; transform: translate3d(-50%, -180%, 0) scale(0.9) rotate(0deg); }
+}
+
+.epic-towerofpower .ep-banner-tower {
+  animation: ep-banner-2250 2.25s cubic-bezier(0.18, 0.9, 0.25, 1) forwards;
+}
+
+.epic-towerofpower .ep-eyebrow {
+  background: rgba(8, 28, 20, 0.92);
+  border: 1px solid rgba(255, 213, 79, 0.56);
+  color: #fff2b2;
+}
+
+.epic-towerofpower .ep-title {
+  color: #ffe98a;
+  text-shadow:
+    0 4px 12px rgba(0, 0, 0, 0.9),
+    0 0 24px rgba(255, 200, 56, 0.72);
+}
+
+.epic-towerofpower .ep-subtitle {
+  background: rgba(8, 28, 20, 0.92);
+  border: 1px solid rgba(52, 211, 153, 0.56);
+  color: #d1fae5;
+}
+
+/* ══════════════════════════════════════════════════════════
+   3. CATOMIC BOMB (2300ms) — Nuclear Meltdown
+   ══════════════════════════════════════════════════════════ */
+
+.epic-catomicbomb .ep-catomic-backdrop {
+  background:
+    radial-gradient(circle at 50% 45%, rgba(255, 122, 24, 0.45) 0%, rgba(132, 14, 18, 0.72) 48%, rgba(8, 2, 4, 0.94) 100%);
+  animation: ep-fade-2300 2.3s cubic-bezier(0.22, 1, 0.36, 1) forwards;
+}
+
+.epic-catomicbomb .ep-catomic-siren {
+  position: absolute;
+  inset: 0;
+  background: radial-gradient(circle at 50% 50%, transparent 38%, rgba(255, 38, 38, 0.56) 100%);
+  will-change: opacity;
+  animation: ep-siren-pulse 0.52s ease-in-out 4 forwards;
+}
+
+@keyframes ep-siren-pulse {
+  0%, 100% { opacity: 0.2; }
+  50% { opacity: 0.95; }
+}
+
+.epic-catomicbomb .ep-catomic-rays {
+  position: absolute;
+  left: 50%;
+  top: 42%;
+  width: 90vmin;
+  height: 90vmin;
+  border-radius: 50%;
+  background:
+    repeating-conic-gradient(
+      from 0deg,
+      rgba(255, 196, 36, 0.38) 0deg 28deg,
+      transparent 28deg 60deg
+    );
+  -webkit-mask-image: radial-gradient(circle, rgba(0, 0, 0, 0.88) 12%, rgba(0, 0, 0, 0.45) 45%, transparent 72%);
+  mask-image: radial-gradient(circle, rgba(0, 0, 0, 0.88) 12%, rgba(0, 0, 0, 0.45) 45%, transparent 72%);
+  will-change: transform, opacity;
+  animation: ep-catomic-hazard-spin 2.3s linear forwards;
+}
+
+@keyframes ep-catomic-hazard-spin {
+  0% { opacity: 0; transform: translate3d(-50%, -50%, 0) scale(0.45) rotate(0deg); }
+  14% { opacity: 0.88; transform: translate3d(-50%, -50%, 0) scale(1.05) rotate(24deg); }
+  82% { opacity: 0.72; transform: translate3d(-50%, -50%, 0) scale(1.3) rotate(130deg); }
+  100% { opacity: 0; transform: translate3d(-50%, -50%, 0) scale(1.45) rotate(160deg); }
+}
+
+.epic-catomicbomb .ep-catomic-shock {
+  position: absolute;
+  left: 50%;
+  top: 44%;
+  width: 18vmin;
+  height: 18vmin;
+  border-radius: 50%;
+  opacity: 0;
+  will-change: transform, opacity;
+}
+
+.epic-catomicbomb .ep-catomic-shock.s1 {
+  border: 3px solid #ffe066;
+  box-shadow: 0 0 20px rgba(255, 178, 36, 0.82);
+  animation: ep-shockwave 1.15s cubic-bezier(0.12, 0.82, 0.24, 1) 0.14s forwards;
+}
+
+.epic-catomicbomb .ep-catomic-shock.s2 {
+  border: 2.5px solid #ff3b30;
+  box-shadow: 0 0 18px rgba(255, 59, 48, 0.78);
+  animation: ep-shockwave 1.3s cubic-bezier(0.14, 0.8, 0.24, 1) 0.34s forwards;
+}
+
+@keyframes ep-shockwave {
+  0% { opacity: 0; transform: translate3d(-50%, -50%, 0) scale(0.2); }
+  12% { opacity: 0.95; transform: translate3d(-50%, -50%, 0) scale(0.9); }
+  100% { opacity: 0; transform: translate3d(-50%, -50%, 0) scale(7.5); }
+}
+
+.epic-catomicbomb .ep-catomic-rocket {
+  position: absolute;
+  left: 50%;
+  top: 42%;
+  width: 0;
+  height: 0;
+  z-index: 3;
+  will-change: transform, opacity;
+  animation: ep-catomic-launch 2.3s cubic-bezier(0.2, 0.86, 0.28, 1) forwards;
+}
+
+@keyframes ep-catomic-launch {
+  0% { opacity: 0; transform: translate3d(0, 26vh, 0) scale(0.7); }
+  18% { opacity: 1; transform: translate3d(0, 0, 0) scale(1.06); }
+  58% { opacity: 1; transform: translate3d(0, -4vh, 0) scale(1); }
+  84% { opacity: 0.95; transform: translate3d(0, -18vh, 0) scale(0.95); }
+  100% { opacity: 0; transform: translate3d(0, -42vh, 0) scale(0.8); }
+}
+
+.epic-catomicbomb .ep-catomic-card {
+  position: absolute;
+  transform: translate3d(-50%, -50%, 0);
+  border: 2.5px solid #ffb703;
+  box-shadow: 0 0 24px rgba(255, 118, 24, 0.8);
+}
+
+.epic-catomicbomb .ep-catomic-bomb-prop {
+  position: absolute;
+  width: clamp(56px, 9vmin, 88px);
+  height: clamp(56px, 9vmin, 88px);
+  z-index: 4;
+}
+
+.epic-catomicbomb .ep-catomic-bomb-prop.b-left {
+  transform: translate3d(-165%, -10%, 0) rotate(-18deg);
+}
+
+.epic-catomicbomb .ep-catomic-bomb-prop.b-right {
+  transform: translate3d(65%, -10%, 0) rotate(18deg);
+}
+
+.epic-catomicbomb .ep-catomic-bomb-prop.b-top {
+  transform: translate3d(-50%, -178%, 0) scale(0.92);
+}
+
+.epic-catomicbomb .ep-catomic-flash {
+  position: absolute;
+  inset: 0;
+  z-index: 5;
+  background: radial-gradient(
+    circle at 50% 44%,
+    rgba(255, 255, 255, 0.88) 0%,
+    rgba(255, 224, 102, 0.56) 24%,
+    rgba(255, 76, 28, 0.28) 52%,
+    transparent 76%
+  );
+  opacity: 0;
+  will-change: transform, opacity;
+  animation: ep-flash-peak 2.3s cubic-bezier(0.16, 1, 0.3, 1) forwards;
+}
+
+.epic-catomicbomb .ep-banner-catomic {
+  animation: ep-banner-2300 2.3s cubic-bezier(0.18, 0.9, 0.25, 1) forwards;
+}
+
+.epic-catomicbomb .ep-eyebrow {
+  background: rgba(34, 8, 6, 0.92);
+  border: 1px solid rgba(255, 183, 3, 0.58);
+  color: #ffe8a3;
+}
+
+.epic-catomicbomb .ep-title {
+  color: #ffd15c;
+  text-shadow:
+    0 4px 12px rgba(0, 0, 0, 0.9),
+    0 0 24px rgba(255, 84, 0, 0.78);
+}
+
+.epic-catomicbomb .ep-subtitle {
+  background: rgba(34, 8, 6, 0.92);
+  border: 1px solid rgba(255, 59, 48, 0.58);
+  color: #ffd6c9;
+}
+
+/* ══════════════════════════════════════════════════════════
+   4. ATTACK OF THE DEAD (2250ms) — Undead Legion Assault
+   ══════════════════════════════════════════════════════════ */
+
+.epic-attackofthedead .ep-dead-backdrop {
+  background:
+    radial-gradient(circle at 50% 48%, rgba(16, 128, 76, 0.42) 0%, rgba(7, 32, 24, 0.82) 52%, rgba(2, 6, 5, 0.95) 100%);
+  animation: ep-fade-2250 2.25s cubic-bezier(0.22, 1, 0.36, 1) forwards;
+}
+
+.epic-attackofthedead .ep-dead-mist {
+  position: absolute;
+  inset: 0;
+  background: radial-gradient(ellipse 90% 50% at 50% 90%, rgba(52, 211, 153, 0.36) 0%, transparent 72%);
+  will-change: transform, opacity;
+  animation: ep-dead-mist-rise 2.25s ease-out forwards;
+}
+
+@keyframes ep-dead-mist-rise {
+  0% { opacity: 0; transform: translate3d(0, 12vh, 0); }
+  20% { opacity: 0.9; transform: translate3d(0, 0, 0); }
+  100% { opacity: 0; transform: translate3d(0, -6vh, 0); }
+}
+
+.epic-attackofthedead .ep-dead-ring {
+  position: absolute;
+  left: 50%;
+  top: 40%;
+  width: 18vmin;
+  height: 18vmin;
+  border-radius: 50%;
+  opacity: 0;
+  will-change: transform, opacity;
+}
+
+.epic-attackofthedead .ep-dead-ring.r1 {
+  border: 3px solid #6ee7b7;
+  box-shadow: 0 0 18px rgba(16, 185, 129, 0.78);
+  animation: ep-shockwave 1.2s cubic-bezier(0.14, 0.82, 0.24, 1) 0.08s forwards;
+}
+
+.epic-attackofthedead .ep-dead-ring.r2 {
+  border: 2px solid #a3e635;
+  box-shadow: 0 0 16px rgba(163, 230, 53, 0.7);
+  animation: ep-shockwave 1.35s cubic-bezier(0.14, 0.82, 0.24, 1) 0.24s forwards;
+}
+
+.epic-attackofthedead .ep-dead-hand {
+  position: absolute;
+  bottom: -4%;
+  width: clamp(135px, 24vmin, 250px);
+  height: clamp(150px, 27vmin, 275px);
+  z-index: 3;
+  will-change: transform, opacity;
+}
+
+.epic-attackofthedead .ep-dead-hand.left {
+  left: clamp(4%, 12vw, 20%);
+  animation: ep-zombie-erupt-left 2.25s cubic-bezier(0.18, 0.88, 0.26, 1) forwards;
+}
+
+.epic-attackofthedead .ep-dead-hand.right {
+  right: clamp(4%, 12vw, 20%);
+  animation: ep-zombie-erupt-right 2.25s cubic-bezier(0.18, 0.88, 0.26, 1) forwards;
+}
+
+@keyframes ep-zombie-erupt-left {
+  0% { opacity: 0; transform: translate3d(-18px, 45%, 0) rotate(-14deg) scale(0.8); }
+  20% { opacity: 1; transform: translate3d(0, -14%, 0) rotate(-4deg) scale(1.06); }
+  76% { opacity: 0.96; transform: translate3d(4px, -18%, 0) rotate(2deg) scale(1); }
+  100% { opacity: 0; transform: translate3d(0, 12%, 0) rotate(0deg) scale(0.92); }
+}
+
+@keyframes ep-zombie-erupt-right {
+  0% { opacity: 0; transform: translate3d(18px, 45%, 0) rotate(14deg) scale(0.8); }
+  20% { opacity: 1; transform: translate3d(0, -14%, 0) rotate(4deg) scale(1.06); }
+  76% { opacity: 0.96; transform: translate3d(-4px, -18%, 0) rotate(-2deg) scale(1); }
+  100% { opacity: 0; transform: translate3d(0, 12%, 0) rotate(0deg) scale(0.92); }
+}
+
+.epic-attackofthedead .ep-dead-center {
+  position: absolute;
+  left: 50%;
+  top: 40%;
+  width: 0;
+  height: 0;
+  z-index: 4;
+}
+
+.epic-attackofthedead .ep-dead-card {
+  position: absolute;
+  border: 2.5px solid #6ee7b7;
+  box-shadow: 0 0 24px rgba(16, 185, 129, 0.78);
+  animation: ep-card-reveal-2250 2.25s cubic-bezier(0.18, 0.9, 0.26, 1) forwards;
+}
+
+.epic-attackofthedead .ep-banner-dead {
+  animation: ep-banner-2250 2.25s cubic-bezier(0.18, 0.9, 0.25, 1) forwards;
+}
+
+.epic-attackofthedead .ep-eyebrow {
+  background: rgba(6, 24, 16, 0.92);
+  border: 1px solid rgba(110, 231, 183, 0.56);
+  color: #a7f3d0;
+}
+
+.epic-attackofthedead .ep-title {
+  color: #b7ffcf;
+  text-shadow:
+    0 4px 12px rgba(0, 0, 0, 0.92),
+    0 0 24px rgba(16, 185, 129, 0.78);
+}
+
+.epic-attackofthedead .ep-subtitle {
+  background: rgba(6, 24, 16, 0.92);
+  border: 1px solid rgba(163, 230, 53, 0.52);
+  color: #ecfccb;
+}
+
+/* ══════════════════════════════════════════════════════════
+   5. GODCAT (2150ms) — Divine Ascension
+   ══════════════════════════════════════════════════════════ */
+
+.epic-godcat .ep-god-backdrop {
+  background:
+    radial-gradient(circle at 50% 42%, rgba(255, 218, 92, 0.48) 0%, rgba(120, 74, 12, 0.68) 46%, rgba(14, 10, 4, 0.92) 100%);
+  animation: ep-fade-2150 2.15s cubic-bezier(0.22, 1, 0.36, 1) forwards;
+}
+
+.epic-godcat .ep-god-rays {
+  position: absolute;
+  left: 50%;
+  top: 40%;
+  width: 96vmin;
+  height: 96vmin;
+  border-radius: 50%;
+  background:
+    repeating-conic-gradient(
+      from 0deg,
+      rgba(255, 250, 224, 0.48) 0deg 4deg,
+      transparent 4deg 16deg,
+      rgba(255, 208, 72, 0.38) 16deg 22deg,
+      transparent 22deg 36deg
+    );
+  -webkit-mask-image: radial-gradient(circle, rgba(0, 0, 0, 0.94) 0%, rgba(0, 0, 0, 0.48) 42%, transparent 72%);
+  mask-image: radial-gradient(circle, rgba(0, 0, 0, 0.94) 0%, rgba(0, 0, 0, 0.48) 42%, transparent 72%);
+  will-change: transform, opacity;
+  animation: ep-god-rays-spin 2.15s cubic-bezier(0.16, 0.85, 0.28, 1) forwards;
+}
+
+@keyframes ep-god-rays-spin {
+  0% { opacity: 0; transform: translate3d(-50%, -50%, 0) scale(0.35) rotate(0deg); }
+  16% { opacity: 0.95; transform: translate3d(-50%, -50%, 0) scale(1.1) rotate(14deg); }
+  80% { opacity: 0.72; transform: translate3d(-50%, -50%, 0) scale(1.36) rotate(40deg); }
+  100% { opacity: 0; transform: translate3d(-50%, -50%, 0) scale(1.5) rotate(52deg); }
+}
+
+.epic-godcat .ep-god-halo {
+  position: absolute;
+  left: 50%;
+  top: 40%;
+  width: 24vmin;
+  height: 24vmin;
+  border-radius: 50%;
+  opacity: 0;
+  will-change: transform, opacity;
+}
+
+.epic-godcat .ep-god-halo.h1 {
+  border: 3px solid #fff7cc;
+  box-shadow: 0 0 22px rgba(255, 222, 108, 0.82);
+  animation: ep-halo-expand 1.3s cubic-bezier(0.14, 0.82, 0.26, 1) 0.04s forwards;
+}
+
+.epic-godcat .ep-god-halo.h2 {
+  border: 2px solid #ffd24c;
+  box-shadow: 0 0 18px rgba(255, 198, 56, 0.72);
+  animation: ep-halo-expand 1.45s cubic-bezier(0.14, 0.82, 0.26, 1) 0.22s forwards;
+}
+
+@keyframes ep-halo-expand {
+  0% { opacity: 0; transform: translate3d(-50%, -50%, 0) scale(0.25); }
+  18% { opacity: 0.95; transform: translate3d(-50%, -50%, 0) scale(1.05); }
+  100% { opacity: 0; transform: translate3d(-50%, -50%, 0) scale(4.2); }
+}
+
+.epic-godcat .ep-god-center {
+  position: absolute;
+  left: 50%;
+  top: 40%;
+  width: 0;
+  height: 0;
+  z-index: 3;
+}
+
+.epic-godcat .ep-god-card {
+  position: absolute;
+  border: 2.5px solid #ffe88f;
+  box-shadow: 0 0 26px rgba(255, 214, 84, 0.84);
+  animation: ep-card-reveal-2150 2.15s cubic-bezier(0.18, 0.9, 0.26, 1) forwards;
+}
+
+.epic-godcat .ep-god-flash {
+  position: absolute;
+  inset: 0;
+  z-index: 5;
+  background: radial-gradient(
+    circle at 50% 42%,
+    rgba(255, 255, 255, 0.9) 0%,
+    rgba(255, 245, 198, 0.6) 24%,
+    rgba(255, 206, 72, 0.28) 52%,
+    transparent 76%
+  );
+  opacity: 0;
+  will-change: transform, opacity;
+  animation: ep-flash-peak 2.15s cubic-bezier(0.16, 1, 0.3, 1) forwards;
+}
+
+.epic-godcat .ep-banner-god {
+  animation: ep-banner-2150 2.15s cubic-bezier(0.18, 0.9, 0.25, 1) forwards;
+}
+
+.epic-godcat .ep-eyebrow {
+  background: rgba(34, 22, 4, 0.92);
+  border: 1px solid rgba(255, 224, 114, 0.6);
+  color: #fff6cf;
+}
+
+.epic-godcat .ep-title {
+  color: #fff3b8;
+  text-shadow:
+    0 4px 12px rgba(0, 0, 0, 0.9),
+    0 0 26px rgba(255, 208, 70, 0.85);
+}
+
+.epic-godcat .ep-subtitle {
+  background: rgba(34, 22, 4, 0.92);
+  border: 1px solid rgba(255, 204, 72, 0.56);
+  color: #ffeeb3;
+}
+
+/* ══════════════════════════════════════════════════════════
+   6. DEVILCAT (2150ms) — Infernal Playmat Summoning
+   ══════════════════════════════════════════════════════════ */
+
+.epic-devilcat .ep-dv-backdrop {
+  background:
+    radial-gradient(120% 72% at 50% 106%, rgba(255, 84, 20, 0.56) 0%, rgba(168, 10, 24, 0.54) 44%, rgba(18, 2, 6, 0.88) 78%, rgba(4, 0, 2, 0.96) 100%);
+  animation: ep-fade-2150 2.15s cubic-bezier(0.22, 1, 0.36, 1) forwards;
+}
+
+.epic-devilcat .ep-dv-flames {
+  position: absolute;
+  inset: 0;
+  z-index: 1;
+}
+
+.epic-devilcat .ep-dv-flame {
+  position: absolute;
+  bottom: -14%;
+  width: var(--fw);
+  height: var(--fh);
+  border-radius: 50% 50% 35% 35% / 75% 75% 25% 25%;
+  transform-origin: bottom center;
+  opacity: 0;
+  animation: ep-dv-flame-surge var(--dur) cubic-bezier(0.18, 0.85, 0.3, 1) var(--delay) forwards;
+}
+
+.epic-devilcat .ep-dv-f-core {
+  background: radial-gradient(
+    ellipse at 50% 82%,
+    rgba(255, 255, 255, 0.78) 0%,
+    rgba(255, 241, 208, 0.72) 18%,
+    rgba(255, 118, 28, 0.58) 46%,
+    rgba(229, 25, 42, 0.32) 74%,
+    transparent 100%
+  );
+}
+
+.epic-devilcat .ep-dv-f-gold {
+  background: radial-gradient(
+    ellipse at 50% 80%,
+    rgba(255, 232, 168, 0.65) 0%,
+    rgba(255, 106, 26, 0.5) 45%,
+    rgba(180, 12, 26, 0.28) 76%,
+    transparent 100%
+  );
+}
+
+.epic-devilcat .ep-dv-f-crimson {
+  background: radial-gradient(
+    ellipse at 50% 78%,
+    rgba(255, 148, 64, 0.52) 0%,
+    rgba(229, 25, 42, 0.46) 48%,
+    rgba(89, 0, 12, 0.28) 78%,
+    transparent 100%
+  );
+}
+
+@keyframes ep-dv-flame-surge {
+  0% {
+    opacity: 0;
+    transform: translate3d(-50%, 36%, 0) scaleX(0.72) scaleY(0.24);
+  }
+  18% {
+    opacity: 0.92;
+    transform: translate3d(-50%, -2%, 0) scaleX(1.04) scaleY(1.08);
+  }
+  52% {
+    opacity: 0.8;
+    transform: translate3d(-50%, -6%, 0) scaleX(0.98) scaleY(1.12);
+  }
+  100% {
+    opacity: 0;
+    transform: translate3d(-50%, -18%, 0) scaleX(0.84) scaleY(0.72);
+  }
+}
+
+.epic-devilcat .ep-dv-seal-wrap {
+  position: absolute;
+  left: 50%;
+  top: 40%;
+  z-index: 2;
+  width: 52vmin;
+  height: 52vmin;
+  display: grid;
+  place-items: center;
+  will-change: transform, opacity;
+  animation: ep-dv-seal-spin 2.15s cubic-bezier(0.18, 0.86, 0.3, 1) forwards;
+}
+
+.epic-devilcat .ep-dv-seal-svg {
+  width: 100%;
+  height: 100%;
+}
+
+@keyframes ep-dv-seal-spin {
+  0% { opacity: 0; transform: translate3d(-50%, -50%, 0) scale(0.36) rotate(-26deg); }
+  16% { opacity: 0.88; transform: translate3d(-50%, -50%, 0) scale(1.04) rotate(-6deg); }
+  78% { opacity: 0.6; transform: translate3d(-50%, -50%, 0) scale(1.12) rotate(26deg); }
+  100% { opacity: 0; transform: translate3d(-50%, -50%, 0) scale(1.2) rotate(36deg); }
+}
+
+.epic-devilcat .ep-dv-center {
+  position: absolute;
+  left: 50%;
+  top: 40%;
+  width: 0;
+  height: 0;
+  z-index: 3;
+}
+
+.epic-devilcat .ep-dv-card {
+  position: absolute;
+  border: 2.5px solid #ff5722;
+  box-shadow: 0 0 26px rgba(229, 25, 42, 0.82);
+  animation: ep-card-reveal-2150 2.15s cubic-bezier(0.18, 0.9, 0.26, 1) forwards;
+}
+
+.epic-devilcat .ep-dv-flash {
+  position: absolute;
+  inset: 0;
+  z-index: 5;
+  background: radial-gradient(
+    circle at 50% 48%,
+    rgba(255, 255, 255, 0.86) 0%,
+    rgba(255, 224, 178, 0.56) 20%,
+    rgba(255, 92, 28, 0.32) 48%,
+    transparent 76%
+  );
+  opacity: 0;
+  will-change: transform, opacity;
+  animation: ep-flash-peak 2.15s cubic-bezier(0.16, 1, 0.3, 1) forwards;
+}
+
+.epic-devilcat .ep-banner-devil {
+  animation: ep-banner-2150 2.15s cubic-bezier(0.18, 0.9, 0.25, 1) forwards;
+}
+
+.epic-devilcat .ep-eyebrow {
+  background: rgba(28, 4, 8, 0.92);
+  border: 1px solid rgba(255, 118, 56, 0.58);
+  color: #ffe2bd;
+}
+
+.epic-devilcat .ep-title {
+  color: #ff9c59;
+  text-shadow:
+    0 4px 12px rgba(0, 0, 0, 0.92),
+    0 0 26px rgba(255, 58, 28, 0.84);
+}
+
+.epic-devilcat .ep-subtitle {
+  background: rgba(28, 4, 8, 0.92);
+  border: 1px solid rgba(229, 25, 42, 0.6);
+  color: #ffd5c2;
+}
+
+/* ── Shared timing keyframes ───────────────────────────────── */
+@keyframes ep-fade-2400 {
+  0% { opacity: 0; }
+  10% { opacity: 1; }
+  80% { opacity: 0.96; }
+  100% { opacity: 0; }
+}
+
+@keyframes ep-fade-2300 {
+  0% { opacity: 0; }
+  10% { opacity: 1; }
+  80% { opacity: 0.96; }
+  100% { opacity: 0; }
+}
+
+@keyframes ep-fade-2250 {
+  0% { opacity: 0; }
+  10% { opacity: 1; }
+  80% { opacity: 0.96; }
+  100% { opacity: 0; }
+}
+
+@keyframes ep-fade-2150 {
+  0% { opacity: 0; }
+  10% { opacity: 1; }
+  80% { opacity: 0.96; }
+  100% { opacity: 0; }
+}
+
+@keyframes ep-flash-peak {
+  0% { opacity: 0; transform: scale(0.6); }
+  6% { opacity: 0.95; transform: scale(1.04); }
+  18% { opacity: 0.45; transform: scale(1.16); }
+  30%, 100% { opacity: 0; transform: scale(1.26); }
+}
+
+@keyframes ep-card-reveal-2250 {
+  0% { opacity: 0; transform: translate3d(-50%, -50%, 0) scale(0.42) translateY(18px); }
+  15% { opacity: 1; transform: translate3d(-50%, -50%, 0) scale(1.08) translateY(0); }
+  24% { opacity: 1; transform: translate3d(-50%, -50%, 0) scale(1) translateY(0); }
+  80% { opacity: 1; transform: translate3d(-50%, -50%, 0) scale(1.02) translateY(-4px); }
+  100% { opacity: 0; transform: translate3d(-50%, -50%, 0) scale(0.88) translateY(-16px); }
+}
+
+@keyframes ep-card-reveal-2150 {
+  0% { opacity: 0; transform: translate3d(-50%, -50%, 0) scale(0.42) translateY(18px); }
+  16% { opacity: 1; transform: translate3d(-50%, -50%, 0) scale(1.08) translateY(0); }
+  25% { opacity: 1; transform: translate3d(-50%, -50%, 0) scale(1) translateY(0); }
+  80% { opacity: 1; transform: translate3d(-50%, -50%, 0) scale(1.02) translateY(-4px); }
+  100% { opacity: 0; transform: translate3d(-50%, -50%, 0) scale(0.88) translateY(-16px); }
+}
+
+@keyframes ep-banner-2400 {
+  0% { opacity: 0; transform: translate3d(0, 14px, 0) scale(1.45); }
+  11% { opacity: 1; transform: translate3d(0, -2px, 0) scale(0.96); }
+  18% { opacity: 1; transform: translate3d(0, 0, 0) scale(1.02); }
+  24% { opacity: 1; transform: translate3d(0, 0, 0) scale(1); }
+  80% { opacity: 1; transform: translate3d(0, 0, 0) scale(1.02); }
+  100% { opacity: 0; transform: translate3d(0, -10px, 0) scale(1.08); }
+}
+
+@keyframes ep-banner-2300 {
+  0% { opacity: 0; transform: translate3d(0, 14px, 0) scale(1.45); }
+  11% { opacity: 1; transform: translate3d(0, -2px, 0) scale(0.96); }
+  18% { opacity: 1; transform: translate3d(0, 0, 0) scale(1.02); }
+  24% { opacity: 1; transform: translate3d(0, 0, 0) scale(1); }
+  80% { opacity: 1; transform: translate3d(0, 0, 0) scale(1.02); }
+  100% { opacity: 0; transform: translate3d(0, -10px, 0) scale(1.08); }
+}
+
+@keyframes ep-banner-2250 {
+  0% { opacity: 0; transform: translate3d(0, 14px, 0) scale(1.45); }
+  11% { opacity: 1; transform: translate3d(0, -2px, 0) scale(0.96); }
+  18% { opacity: 1; transform: translate3d(0, 0, 0) scale(1.02); }
+  24% { opacity: 1; transform: translate3d(0, 0, 0) scale(1); }
+  80% { opacity: 1; transform: translate3d(0, 0, 0) scale(1.02); }
+  100% { opacity: 0; transform: translate3d(0, -10px, 0) scale(1.08); }
+}
+
+@keyframes ep-banner-2150 {
+  0% { opacity: 0; transform: translate3d(0, 14px, 0) scale(1.45); }
+  11% { opacity: 1; transform: translate3d(0, -2px, 0) scale(0.96); }
+  18% { opacity: 1; transform: translate3d(0, 0, 0) scale(1.02); }
+  24% { opacity: 1; transform: translate3d(0, 0, 0) scale(1); }
+  80% { opacity: 1; transform: translate3d(0, 0, 0) scale(1.02); }
+  100% { opacity: 0; transform: translate3d(0, -10px, 0) scale(1.08); }
+}
+
+/* ── Reduced-motion accessibility fallback ────────────────── */
+@media (prefers-reduced-motion: reduce) {
+  .epic-overlay .ep-arma-ring,
+  .epic-overlay .ep-arma-eclipse-core,
+  .epic-overlay .ep-arma-clash-stage,
+  .epic-overlay .ep-arma-flash,
+  .epic-overlay .ep-arma-seam,
+  .epic-overlay .ep-tower-rays,
+  .epic-overlay .ep-tower-orbit,
+  .epic-overlay .ep-tower-center,
+  .epic-overlay .ep-catomic-siren,
+  .epic-overlay .ep-catomic-rays,
+  .epic-overlay .ep-catomic-shock,
+  .epic-overlay .ep-catomic-rocket,
+  .epic-overlay .ep-catomic-flash,
+  .epic-overlay .ep-dead-mist,
+  .epic-overlay .ep-dead-ring,
+  .epic-overlay .ep-dead-hand,
+  .epic-overlay .ep-dead-center,
+  .epic-overlay .ep-god-rays,
+  .epic-overlay .ep-god-halo,
+  .epic-overlay .ep-god-center,
+  .epic-overlay .ep-god-flash,
+  .epic-overlay .ep-dv-flames,
+  .epic-overlay .ep-dv-seal-wrap,
+  .epic-overlay .ep-dv-center,
+  .epic-overlay .ep-dv-flash,
+  .epic-overlay .ep-radial-particles,
+  .epic-overlay .ep-rising-particles {
+    display: none;
+  }
+
+  .epic-overlay .ep-backdrop,
+  .epic-overlay .ep-banner {
+    margin-top: 0;
+    transform: none;
+    animation: ep-reduced-fade 2.15s ease forwards !important;
+  }
+
+  .epic-armageddon .ep-arma-heaven,
+  .epic-armageddon .ep-arma-hell {
+    transform: none;
+    animation: none;
+  }
+}
+
+@keyframes ep-reduced-fade {
+  0% { opacity: 0; }
+  12% { opacity: 1; }
+  82% { opacity: 1; }
+  100% { opacity: 0; }
+}

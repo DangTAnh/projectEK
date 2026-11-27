@@ -150,7 +150,8 @@ def test_failed_broadcast_removes_socket():
         await asyncio.sleep(0)
 
     asyncio.run(settle())
-    assert len(good.sent) == 1
+    assert len(good.sent) == 2
+    assert [p["name"] for p in good.sent[-1]["view"]["players"]] == ["An"]
     assert "Binh" not in room.conns
     assert bad.closed
 

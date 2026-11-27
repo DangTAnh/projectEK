@@ -6,12 +6,19 @@ __pycache__/
 .pythonlibs/
 .local/
 .upm/
+.venv/
+venv/
+*.log
+
+# Environment
+.env
+.env.*
 
 # Node / Vite
 web/node_modules/
 web/dist/
 
-# Ảnh chụp/debug tay, không phải mã sản phẩm
+# Manual debug captures
 tmp_shots/
 
 # OS / editor

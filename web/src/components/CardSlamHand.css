@@ -1,0 +1,298 @@
+/* ══════════════════════════════════════════════════════════
+   CardSlamHand — Real-Photo Tactile Card-Slam Choreography
+   Pure GPU (transform: translate3d/rotate/scale + opacity ONLY)
+   Zero backdrop-filter, zero mix-blend-mode, zero layout thrash.
+   ══════════════════════════════════════════════════════════ */
+
+.card-slam-layer {
+  position: absolute;
+  inset: -160px -120px;
+  pointer-events: none;
+  overflow: visible;
+  z-index: 25;
+  contain: layout style;
+  /* Calibrated to /ui/play-hand.png (264x424, wrist bottom-right, palm at 42%/34%) */
+  --slam-hand-rot: -4deg;
+  --slam-hand-anchor-x: 8%;
+  --slam-hand-anchor-y: 16%;
+  --slam-ripple-color: rgba(246, 201, 94, 0.82);
+  --slam-ripple-soft: rgba(246, 201, 94, 0.34);
+}
+
+.card-slam-layer.tone-danger {
+  --slam-ripple-color: rgba(242, 95, 102, 0.86);
+  --slam-ripple-soft: rgba(242, 95, 102, 0.36);
+}
+
+.card-slam-layer.tone-emerald {
+  --slam-ripple-color: rgba(66, 218, 139, 0.84);
+  --slam-ripple-soft: rgba(66, 218, 139, 0.34);
+}
+
+/* Soft contact shadow under the palm as it hits the felt */
+.slam-shadow {
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  width: 170px;
+  height: 112px;
+  margin-left: -85px;
+  margin-top: -56px;
+  border-radius: 50%;
+  background: radial-gradient(
+    ellipse at center,
+    rgba(0, 0, 0, 0.52) 0%,
+    rgba(0, 0, 0, 0.24) 48%,
+    rgba(0, 0, 0, 0) 76%
+  );
+  opacity: 0;
+  will-change: transform, opacity;
+  animation: slam-shadow-hit 680ms cubic-bezier(0.22, 1, 0.36, 1) forwards;
+}
+
+/* Tabletop shockwave ring at the 36% impact frame */
+.slam-ripple {
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  width: 132px;
+  height: 132px;
+  margin-left: -66px;
+  margin-top: -66px;
+  border-radius: 50%;
+  border: 2.5px solid var(--slam-ripple-color);
+  opacity: 0;
+  will-change: transform, opacity;
+  animation: slam-ripple-burst 680ms cubic-bezier(0.16, 1, 0.3, 1) forwards;
+}
+
+.slam-ripple-outer {
+  width: 158px;
+  height: 158px;
+  margin-left: -79px;
+  margin-top: -79px;
+  border-width: 1.5px;
+  border-color: var(--slam-ripple-soft);
+  animation-name: slam-ripple-outer-burst;
+}
+
+/* Wrapper positioned at table/midfield center; animated via GPU transform */
+.slam-hand-track {
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  width: clamp(138px, 35%, 172px);
+  transform-origin: center center;
+  opacity: 0;
+  will-change: transform, opacity;
+}
+
+.slam-hand-img {
+  display: block;
+  width: 100%;
+  height: auto;
+  object-fit: contain;
+  user-select: none;
+  -webkit-user-drag: none;
+  -webkit-mask-image: linear-gradient(to bottom, #000 0%, #000 76%, transparent 100%);
+  mask-image: linear-gradient(to bottom, #000 0%, #000 76%, transparent 100%);
+  transform: translate3d(var(--slam-hand-anchor-x), var(--slam-hand-anchor-y), 0)
+    rotate(var(--slam-hand-rot));
+}
+
+/* ─── My play: enters along forearm from bottom-right, slams center, recoils, retracts ─── */
+.card-slam-layer.is-mine .slam-hand-track {
+  animation: slam-hand-mine 680ms cubic-bezier(0.22, 0.9, 0.32, 1) forwards;
+}
+
+@keyframes slam-hand-mine {
+  0% {
+    opacity: 0;
+    transform: translate3d(calc(-50% + 96px), calc(-50% + 188px), 0)
+      rotate(14deg) scale(1.16);
+  }
+  10% {
+    opacity: 1;
+    transform: translate3d(calc(-50% + 62px), calc(-50% + 118px), 0)
+      rotate(8deg) scale(1.12);
+  }
+  28% {
+    opacity: 1;
+    transform: translate3d(calc(-50% + 8px), calc(-50% + 16px), 0)
+      rotate(-1deg) scale(1.06);
+  }
+  /* 36%: crisp downward impact onto the discard card */
+  36% {
+    opacity: 1;
+    transform: translate3d(-50%, -50%, 0) rotate(-3deg) scale(0.92);
+  }
+  /* 43%: micro-recoil on tabletop */
+  43% {
+    opacity: 1;
+    transform: translate3d(calc(-50% + 2px), calc(-50% + 3px), 0)
+      rotate(-1deg) scale(0.975);
+  }
+  /* 55%: fingers lift cleanly off the card */
+  55% {
+    opacity: 1;
+    transform: translate3d(calc(-50% + 18px), calc(-50% + 36px), 0)
+      rotate(3deg) scale(1.04);
+  }
+  86% {
+    opacity: 0.85;
+    transform: translate3d(calc(-50% + 84px), calc(-50% + 162px), 0)
+      rotate(12deg) scale(1.12);
+  }
+  100% {
+    opacity: 0;
+    transform: translate3d(calc(-50% + 112px), calc(-50% + 210px), 0)
+      rotate(16deg) scale(1.15);
+  }
+}
+
+/* ─── Opponent play: reaches across the felt from top (rotated 180deg) ─── */
+.card-slam-layer.is-opponent .slam-hand-track {
+  animation: slam-hand-opponent 680ms cubic-bezier(0.22, 0.9, 0.32, 1) forwards;
+}
+
+@keyframes slam-hand-opponent {
+  0% {
+    opacity: 0;
+    transform: translate3d(calc(-50% - 92px), calc(-50% - 188px), 0)
+      rotate(194deg) scale(1.14);
+  }
+  10% {
+    opacity: 1;
+    transform: translate3d(calc(-50% - 58px), calc(-50% - 118px), 0)
+      rotate(188deg) scale(1.1);
+  }
+  28% {
+    opacity: 1;
+    transform: translate3d(calc(-50% - 8px), calc(-50% - 16px), 0)
+      rotate(179deg) scale(1.05);
+  }
+  /* 36%: impact slam across the table */
+  36% {
+    opacity: 1;
+    transform: translate3d(-50%, -50%, 0) rotate(177deg) scale(0.92);
+  }
+  /* 43%: micro-recoil */
+  43% {
+    opacity: 1;
+    transform: translate3d(calc(-50% - 2px), calc(-50% - 3px), 0)
+      rotate(179deg) scale(0.975);
+  }
+  /* 55%: lift & release */
+  55% {
+    opacity: 1;
+    transform: translate3d(calc(-50% - 18px), calc(-50% - 36px), 0)
+      rotate(183deg) scale(1.04);
+  }
+  86% {
+    opacity: 0.85;
+    transform: translate3d(calc(-50% - 82px), calc(-50% - 162px), 0)
+      rotate(191deg) scale(1.11);
+  }
+  100% {
+    opacity: 0;
+    transform: translate3d(calc(-50% - 108px), calc(-50% - 210px), 0)
+      rotate(195deg) scale(1.14);
+  }
+}
+
+/* ─── Contact shadow & shockwave rings synced to 36% slam impact ─── */
+@keyframes slam-shadow-hit {
+  0%, 16% {
+    opacity: 0;
+    transform: translate3d(0, 0, 0) scale(1.32);
+  }
+  32% {
+    opacity: 0.35;
+    transform: translate3d(0, 0, 0) scale(1.06);
+  }
+  36% {
+    opacity: 0.62;
+    transform: translate3d(0, 0, 0) scale(0.88);
+  }
+  44% {
+    opacity: 0.48;
+    transform: translate3d(0, 0, 0) scale(0.96);
+  }
+  68% {
+    opacity: 0;
+    transform: translate3d(0, 0, 0) scale(1.22);
+  }
+  100% {
+    opacity: 0;
+    transform: translate3d(0, 0, 0) scale(1.28);
+  }
+}
+
+@keyframes slam-ripple-burst {
+  0%, 34% {
+    opacity: 0;
+    transform: translate3d(0, 0, 0) scale(0.28);
+  }
+  37% {
+    opacity: 0.92;
+    transform: translate3d(0, 0, 0) scale(0.52);
+  }
+  58% {
+    opacity: 0.42;
+    transform: translate3d(0, 0, 0) scale(1.24);
+  }
+  82%, 100% {
+    opacity: 0;
+    transform: translate3d(0, 0, 0) scale(1.62);
+  }
+}
+
+@keyframes slam-ripple-outer-burst {
+  0%, 36% {
+    opacity: 0;
+    transform: translate3d(0, 0, 0) scale(0.35);
+  }
+  42% {
+    opacity: 0.62;
+    transform: translate3d(0, 0, 0) scale(0.76);
+  }
+  70% {
+    opacity: 0.2;
+    transform: translate3d(0, 0, 0) scale(1.48);
+  }
+  92%, 100% {
+    opacity: 0;
+    transform: translate3d(0, 0, 0) scale(1.85);
+  }
+}
+
+/* Responsive sizing for mobile midfield */
+@media (max-width: 900px) {
+  .slam-hand-track {
+    width: clamp(92px, 31%, 118px);
+  }
+  .slam-shadow {
+    width: 118px;
+    height: 78px;
+    margin-left: -59px;
+    margin-top: -39px;
+  }
+  .slam-ripple {
+    width: 94px;
+    height: 94px;
+    margin-left: -47px;
+    margin-top: -47px;
+  }
+  .slam-ripple-outer {
+    width: 116px;
+    height: 116px;
+    margin-left: -58px;
+    margin-top: -58px;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .card-slam-layer {
+    display: none !important;
+  }
+}

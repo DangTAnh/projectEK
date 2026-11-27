@@ -4,7 +4,7 @@ is_action: chơi từ tay trên lượt mình; anytime: chơi được cả ngo�
 nopeable: có thể bị Nope; wild_cat: feral cat dùng làm mèo bất kỳ trong combo.
 """
 
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 
 
 @dataclass

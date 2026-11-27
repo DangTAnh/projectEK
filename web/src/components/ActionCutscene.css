@@ -1,0 +1,1206 @@
+/* ══════════════════════════════════════════════════════════
+   ActionCutscene — Pure GPU Real-Photo Action Cutscenes (~1.3s)
+   ONLY transform (translate3d/rotate/scale/scaleX) & opacity.
+   Zero backdrop-filter, zero mix-blend-mode, zero heavy filters.
+   ══════════════════════════════════════════════════════════ */
+
+.action-cutscene-layer {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  overflow: hidden;
+  z-index: 36;
+  contain: layout paint style;
+  --ac-dur: 1280ms;
+  --ac-accent: #f6c95e;
+  --ac-accent-soft: rgba(246, 201, 94, 0.34);
+  --ac-tint: rgba(246, 201, 94, 0.16);
+  --ac-runner-flip: 1;
+  --ac-fist-flip: -1;
+  --ac-steal-flip: 1;
+  --ac-dog-flip: 1;
+}
+
+.action-cutscene-layer.ac-tone-danger {
+  --ac-accent: #ff5b66;
+  --ac-accent-soft: rgba(255, 91, 102, 0.36);
+  --ac-tint: rgba(220, 38, 38, 0.22);
+}
+
+.action-cutscene-layer.ac-tone-emerald {
+  --ac-accent: #42da8b;
+  --ac-accent-soft: rgba(66, 218, 139, 0.36);
+  --ac-tint: rgba(34, 197, 94, 0.18);
+}
+
+.action-cutscene-layer.ac-tone-lime {
+  --ac-accent: #84ff63;
+  --ac-accent-soft: rgba(132, 255, 99, 0.36);
+  --ac-tint: rgba(64, 214, 72, 0.22);
+}
+
+.action-cutscene-layer.ac-tone-cyan {
+  --ac-accent: #38bdf8;
+  --ac-accent-soft: rgba(56, 189, 248, 0.38);
+  --ac-tint: rgba(14, 165, 233, 0.22);
+}
+
+.action-cutscene-layer.ac-tone-cosmic {
+  --ac-accent: #a855f7;
+  --ac-accent-soft: rgba(86, 230, 255, 0.42);
+  --ac-tint: rgba(168, 85, 247, 0.24);
+}
+
+.ac-backdrop {
+  position: absolute;
+  inset: 0;
+  background: radial-gradient(
+    circle at 50% 50%,
+    var(--ac-tint) 0%,
+    rgba(3, 14, 10, 0.38) 58%,
+    rgba(2, 8, 6, 0.56) 100%
+  );
+  opacity: 0;
+  will-change: opacity;
+  animation: ac-fade-backdrop var(--ac-dur) cubic-bezier(0.22, 1, 0.36, 1) forwards;
+}
+
+@keyframes ac-fade-backdrop {
+  0% { opacity: 0; }
+  14% { opacity: 1; }
+  78% { opacity: 0.92; }
+  100% { opacity: 0; }
+}
+
+/* ─── Concentric Impact / Radar Rings ─── */
+.ac-ring {
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  width: 128px;
+  height: 128px;
+  margin-left: -64px;
+  margin-top: -64px;
+  border-radius: 50%;
+  border: 2.5px solid var(--ac-accent);
+  opacity: 0;
+  will-change: transform, opacity;
+  animation: ac-ring-expand var(--ac-dur) cubic-bezier(0.16, 1, 0.3, 1) forwards;
+}
+
+.ac-ring-b {
+  width: 154px;
+  height: 154px;
+  margin-left: -77px;
+  margin-top: -77px;
+  border-width: 1.5px;
+  border-color: var(--ac-accent-soft);
+  animation-delay: 90ms;
+}
+
+@keyframes ac-ring-expand {
+  0%, 10% { opacity: 0; transform: scale(0.32); }
+  26% { opacity: 0.9; transform: scale(0.88); }
+  75%, 100% { opacity: 0; transform: scale(1.95); }
+}
+
+/* ─── Hero Photo Prop ─── */
+.ac-hero-track {
+  position: absolute;
+  left: 50%;
+  top: 46%;
+  width: clamp(138px, 26%, 200px);
+  margin-left: -90px;
+  margin-top: -90px;
+  z-index: 4;
+  opacity: 0;
+  will-change: transform, opacity;
+}
+
+.ac-hero-orient {
+  width: 100%;
+  display: grid;
+  place-items: center;
+}
+
+.ac-hero-img {
+  display: block;
+  width: 100%;
+  max-height: 184px;
+  object-fit: contain;
+  user-select: none;
+  -webkit-user-drag: none;
+}
+
+/* ─── Stamp Banner ─── */
+.ac-banner {
+  position: absolute;
+  left: 50%;
+  bottom: 14%;
+  z-index: 8;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 5px;
+  opacity: 0;
+  will-change: transform, opacity;
+  animation: ac-banner-slam var(--ac-dur) cubic-bezier(0.2, 0.9, 0.25, 1) forwards;
+}
+
+.ac-stamp {
+  padding: 6px 20px;
+  border-radius: 999px;
+  background: rgba(8, 22, 17, 0.92);
+  border: 2px solid var(--ac-accent);
+  color: #ffffff;
+  font-family: var(--font-display, 'Baloo 2', system-ui, sans-serif);
+  font-size: clamp(18px, 2.8vw, 26px);
+  font-weight: 800;
+  letter-spacing: 1.4px;
+  text-transform: uppercase;
+  white-space: nowrap;
+  box-shadow: 0 8px 22px rgba(0, 0, 0, 0.56);
+}
+
+.ac-subline {
+  padding: 3px 12px;
+  border-radius: 999px;
+  background: rgba(5, 16, 12, 0.88);
+  border: 1px solid rgba(255, 255, 255, 0.2);
+  color: #dff5ea;
+  font-size: 12px;
+  font-weight: 800;
+  letter-spacing: 0.5px;
+  white-space: nowrap;
+}
+
+@keyframes ac-banner-slam {
+  0% {
+    opacity: 0;
+    transform: translate3d(-50%, 16px, 0) scale(1.45);
+  }
+  16% {
+    opacity: 1;
+    transform: translate3d(-50%, 0, 0) scale(0.95);
+  }
+  24% {
+    opacity: 1;
+    transform: translate3d(-50%, 0, 0) scale(1.03);
+  }
+  78% {
+    opacity: 1;
+    transform: translate3d(-50%, 0, 0) scale(1);
+  }
+  100% {
+    opacity: 0;
+    transform: translate3d(-50%, -10px, 0) scale(0.94);
+  }
+}
+
+/* ══════════════════════════════════════════════════════════
+   1. SKIP / SUPER SKIP — HERO Businessman Sprint + Speed Streaks
+   ══════════════════════════════════════════════════════════ */
+.ac-family-skip .ac-hero-orient {
+  transform: scaleX(var(--ac-runner-flip));
+}
+
+.ac-family-skip .ac-hero-track {
+  width: clamp(150px, 28%, 212px);
+  margin-left: -100px;
+  margin-top: -100px;
+  animation: ac-businessman-sprint var(--ac-dur) cubic-bezier(0.24, 0.82, 0.36, 1) forwards;
+}
+
+@keyframes ac-businessman-sprint {
+  0% {
+    opacity: 0;
+    transform: translate3d(-260px, 8px, 0) rotate(-6deg) scale(0.92);
+  }
+  12% {
+    opacity: 1;
+    transform: translate3d(-150px, -8px, 0) rotate(2deg) scale(1);
+  }
+  26% {
+    opacity: 1;
+    transform: translate3d(-65px, 6px, 0) rotate(5deg) scale(1.03);
+  }
+  42% {
+    opacity: 1;
+    transform: translate3d(10px, -10px, 0) rotate(3deg) scale(1.05);
+  }
+  58% {
+    opacity: 1;
+    transform: translate3d(85px, 6px, 0) rotate(6deg) scale(1.02);
+  }
+  76% {
+    opacity: 1;
+    transform: translate3d(175px, -8px, 0) rotate(7deg) scale(0.98);
+  }
+  100% {
+    opacity: 0;
+    transform: translate3d(300px, 4px, 0) rotate(10deg) scale(0.9);
+  }
+}
+
+.ac-speed-lines {
+  position: absolute;
+  inset: 0;
+  z-index: 2;
+}
+
+.ac-streak {
+  position: absolute;
+  left: 50%;
+  height: 3px;
+  border-radius: 999px;
+  background: linear-gradient(90deg, transparent 0%, var(--ac-accent) 60%, #ffffff 100%);
+  opacity: 0;
+  will-change: transform, opacity;
+  animation: ac-streak-zip 680ms cubic-bezier(0.16, 1, 0.3, 1) forwards;
+}
+
+.ac-streak.s1 { top: 34%; width: 170px; margin-left: -120px; animation-delay: 40ms; }
+.ac-streak.s2 { top: 44%; width: 220px; margin-left: -150px; animation-delay: 110ms; }
+.ac-streak.s3 { top: 53%; width: 150px; margin-left: -100px; animation-delay: 170ms; }
+.ac-streak.s4 { top: 61%; width: 195px; margin-left: -135px; animation-delay: 240ms; }
+
+@keyframes ac-streak-zip {
+  0% { opacity: 0; transform: translate3d(-120px, 0, 0) scaleX(0.4); }
+  30% { opacity: 0.92; transform: translate3d(-10px, 0, 0) scaleX(1.1); }
+  100% { opacity: 0; transform: translate3d(170px, 0, 0) scaleX(0.5); }
+}
+
+/* ══════════════════════════════════════════════════════════
+   2. ATTACK — Punching Fist + Red Impact Burst
+   ══════════════════════════════════════════════════════════ */
+.ac-family-attack .ac-hero-orient {
+  transform: scaleX(var(--ac-fist-flip));
+}
+
+.ac-family-attack .ac-hero-track {
+  animation: ac-attack-punch var(--ac-dur) cubic-bezier(0.16, 1, 0.3, 1) forwards;
+}
+
+@keyframes ac-attack-punch {
+  0% {
+    opacity: 0;
+    transform: translate3d(-220px, 18px, 0) rotate(-14deg) scale(0.75);
+  }
+  20% {
+    opacity: 1;
+    transform: translate3d(14px, -6px, 0) rotate(5deg) scale(1.16);
+  }
+  30% {
+    opacity: 1;
+    transform: translate3d(-4px, 2px, 0) rotate(-2deg) scale(1.04);
+  }
+  74% {
+    opacity: 1;
+    transform: translate3d(8px, -2px, 0) rotate(2deg) scale(1.06);
+  }
+  100% {
+    opacity: 0;
+    transform: translate3d(120px, -14px, 0) rotate(10deg) scale(0.86);
+  }
+}
+
+/* ══════════════════════════════════════════════════════════
+   3. REVERSE — U-Turn Sign 180 Spin
+   ══════════════════════════════════════════════════════════ */
+.ac-family-reverse .ac-hero-track {
+  animation: ac-reverse-spin var(--ac-dur) cubic-bezier(0.22, 1, 0.36, 1) forwards;
+}
+
+@keyframes ac-reverse-spin {
+  0% {
+    opacity: 0;
+    transform: translate3d(0, 0, 0) rotate(-180deg) scale(0.45);
+  }
+  28% {
+    opacity: 1;
+    transform: translate3d(0, 0, 0) rotate(18deg) scale(1.08);
+  }
+  42% {
+    opacity: 1;
+    transform: translate3d(0, 0, 0) rotate(0deg) scale(1);
+  }
+  78% {
+    opacity: 1;
+    transform: translate3d(0, 0, 0) rotate(0deg) scale(1.04);
+  }
+  100% {
+    opacity: 0;
+    transform: translate3d(0, 0, 0) rotate(180deg) scale(0.6);
+  }
+}
+
+/* ══════════════════════════════════════════════════════════
+   4. SHUFFLE — Shaking Hands + 3 Riffling Card Backs
+   ══════════════════════════════════════════════════════════ */
+.ac-family-shuffle .ac-hero-track {
+  animation: ac-shuffle-shake var(--ac-dur) cubic-bezier(0.22, 1, 0.36, 1) forwards;
+}
+
+@keyframes ac-shuffle-shake {
+  0% { opacity: 0; transform: translate3d(0, 14px, 0) scale(0.65); }
+  18% { opacity: 1; transform: translate3d(-12px, -6px, 0) rotate(-6deg) scale(1.04); }
+  30% { opacity: 1; transform: translate3d(14px, 4px, 0) rotate(6deg) scale(1.04); }
+  42% { opacity: 1; transform: translate3d(-12px, -4px, 0) rotate(-5deg) scale(1.04); }
+  54% { opacity: 1; transform: translate3d(10px, 4px, 0) rotate(5deg) scale(1.02); }
+  74% { opacity: 1; transform: translate3d(0, 0, 0) rotate(0deg) scale(1); }
+  100% { opacity: 0; transform: translate3d(0, -14px, 0) scale(0.84); }
+}
+
+.ac-card-fan {
+  position: absolute;
+  left: 50%;
+  top: 46%;
+  width: 0;
+  height: 0;
+  z-index: 3;
+}
+
+.ac-fan-card,
+.ac-swirl-card {
+  position: absolute;
+  width: 66px;
+  height: 94px;
+  margin-left: -33px;
+  margin-top: -47px;
+  border-radius: 9px;
+  overflow: hidden;
+  border: 1.5px solid rgba(246, 201, 94, 0.72);
+  box-shadow: 0 8px 18px rgba(0, 0, 0, 0.5);
+  opacity: 0;
+  will-change: transform, opacity;
+}
+
+.ac-card-img {
+  display: block;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  user-select: none;
+  -webkit-user-drag: none;
+}
+
+.ac-fan-card.f1 { animation: ac-fan-1 var(--ac-dur) cubic-bezier(0.22, 1, 0.36, 1) forwards; }
+.ac-fan-card.f2 { animation: ac-fan-2 var(--ac-dur) cubic-bezier(0.22, 1, 0.36, 1) forwards; }
+.ac-fan-card.f3 { animation: ac-fan-3 var(--ac-dur) cubic-bezier(0.22, 1, 0.36, 1) forwards; }
+
+@keyframes ac-fan-1 {
+  0% { opacity: 0; transform: translate3d(0, 0, 0) rotate(0deg) scale(0.6); }
+  25% { opacity: 0.95; transform: translate3d(-86px, -18px, 0) rotate(-22deg) scale(0.95); }
+  55% { opacity: 0.95; transform: translate3d(-44px, -28px, 0) rotate(-12deg) scale(1); }
+  100% { opacity: 0; transform: translate3d(0, 0, 0) rotate(0deg) scale(0.6); }
+}
+
+@keyframes ac-fan-2 {
+  0% { opacity: 0; transform: translate3d(0, 0, 0) scale(0.6); }
+  28% { opacity: 0.95; transform: translate3d(0, -48px, 0) rotate(2deg) scale(1); }
+  58% { opacity: 0.95; transform: translate3d(0, -34px, 0) rotate(-4deg) scale(1.04); }
+  100% { opacity: 0; transform: translate3d(0, 0, 0) scale(0.6); }
+}
+
+@keyframes ac-fan-3 {
+  0% { opacity: 0; transform: translate3d(0, 0, 0) rotate(0deg) scale(0.6); }
+  25% { opacity: 0.95; transform: translate3d(86px, -18px, 0) rotate(22deg) scale(0.95); }
+  55% { opacity: 0.95; transform: translate3d(44px, -28px, 0) rotate(12deg) scale(1); }
+  100% { opacity: 0; transform: translate3d(0, 0, 0) rotate(0deg) scale(0.6); }
+}
+
+/* ══════════════════════════════════════════════════════════
+   5. NOPE / YUP — Nope-Man + Raised Palm Stamp Slam
+   ══════════════════════════════════════════════════════════ */
+.ac-family-nope .ac-hero-track {
+  animation: ac-nope-man-pop var(--ac-dur) cubic-bezier(0.18, 0.92, 0.28, 1) forwards;
+}
+
+.ac-nope-badge {
+  position: absolute;
+  left: 50%;
+  top: 46%;
+  width: 88px;
+  margin-left: 24px;
+  margin-top: -22px;
+  z-index: 6;
+  opacity: 0;
+  will-change: transform, opacity;
+  animation: ac-nope-hand-slam var(--ac-dur) cubic-bezier(0.18, 0.92, 0.28, 1) forwards;
+}
+
+.ac-nope-badge-img {
+  display: block;
+  width: 100%;
+  height: auto;
+  object-fit: contain;
+  user-select: none;
+  -webkit-user-drag: none;
+}
+
+@keyframes ac-nope-man-pop {
+  0% { opacity: 0; transform: translate3d(-18px, 28px, 0) scale(0.65); }
+  18% { opacity: 1; transform: translate3d(-18px, -6px, 0) scale(1.06); }
+  74% { opacity: 1; transform: translate3d(-18px, -2px, 0) scale(1); }
+  100% { opacity: 0; transform: translate3d(-18px, -16px, 0) scale(0.88); }
+}
+
+@keyframes ac-nope-hand-slam {
+  0%, 10% { opacity: 0; transform: translate3d(0, 0, 0) scale(2.1) rotate(14deg); }
+  26% { opacity: 1; transform: translate3d(0, 0, 0) scale(0.92) rotate(-6deg); }
+  36% { opacity: 1; transform: translate3d(0, 0, 0) scale(1.04) rotate(-2deg); }
+  76% { opacity: 1; transform: translate3d(0, 0, 0) scale(1) rotate(-3deg); }
+  100% { opacity: 0; transform: translate3d(0, -10px, 0) scale(0.86); }
+}
+
+/* ══════════════════════════════════════════════════════════
+   6. DEFUSE — Scissors Snip Beside Bomb
+   ══════════════════════════════════════════════════════════ */
+.ac-family-defuse .ac-secondary-prop.is-prop-icon {
+  position: absolute;
+  left: 50%;
+  top: 46%;
+  width: 110px;
+  margin-left: -102px;
+  margin-top: -58px;
+  z-index: 3;
+  opacity: 0;
+  will-change: transform, opacity;
+  animation: ac-defuse-bomb var(--ac-dur) cubic-bezier(0.22, 1, 0.36, 1) forwards;
+}
+
+.ac-family-defuse .ac-hero-track {
+  width: 118px;
+  margin-left: -8px;
+  margin-top: -64px;
+  animation: ac-defuse-snip var(--ac-dur) cubic-bezier(0.22, 1, 0.36, 1) forwards;
+}
+
+.ac-prop-img {
+  display: block;
+  width: 100%;
+  height: auto;
+  object-fit: contain;
+  user-select: none;
+  -webkit-user-drag: none;
+}
+
+@keyframes ac-defuse-bomb {
+  0% { opacity: 0; transform: scale(0.55) rotate(-10deg); }
+  22% { opacity: 1; transform: scale(1.05) rotate(-4deg); }
+  72% { opacity: 0.9; transform: scale(0.95) rotate(0deg); }
+  100% { opacity: 0; transform: scale(0.7) rotate(6deg); }
+}
+
+@keyframes ac-defuse-snip {
+  0% { opacity: 0; transform: translate3d(60px, -40px, 0) rotate(24deg) scale(0.85); }
+  22% { opacity: 1; transform: translate3d(0, 0, 0) rotate(-14deg) scale(1.06); }
+  34% { opacity: 1; transform: translate3d(-12px, 4px, 0) rotate(-32deg) scale(0.98); }
+  46% { opacity: 1; transform: translate3d(-4px, 0, 0) rotate(-10deg) scale(1.04); }
+  76% { opacity: 1; transform: translate3d(0, 0, 0) rotate(-12deg) scale(1); }
+  100% { opacity: 0; transform: translate3d(20px, -16px, 0) scale(0.84); }
+}
+
+/* ══════════════════════════════════════════════════════════
+   7. FUTURE — Detective / Binoculars Zoom + Radar Rings
+   ══════════════════════════════════════════════════════════ */
+.ac-family-future .ac-hero-track {
+  animation: ac-future-zoom var(--ac-dur) cubic-bezier(0.22, 1, 0.36, 1) forwards;
+}
+
+@keyframes ac-future-zoom {
+  0% { opacity: 0; transform: scale(0.42) rotate(-6deg); }
+  26% { opacity: 1; transform: scale(1.12) rotate(2deg); }
+  62% { opacity: 1; transform: scale(1.02) rotate(-1deg); }
+  100% { opacity: 0; transform: scale(1.22) rotate(0deg); }
+}
+
+/* ══════════════════════════════════════════════════════════
+   8. STEAL / FAVOR / TRAP — Swoops Across Snatching Card
+   ══════════════════════════════════════════════════════════ */
+.ac-family-steal .ac-hero-orient {
+  transform: scaleX(var(--ac-steal-flip));
+}
+
+.ac-family-steal .ac-secondary-prop.is-prop-card {
+  position: absolute;
+  left: 50%;
+  top: 46%;
+  width: 72px;
+  height: 102px;
+  margin-left: -36px;
+  margin-top: -51px;
+  border-radius: 10px;
+  overflow: hidden;
+  border: 1.5px solid rgba(246, 201, 94, 0.78);
+  box-shadow: 0 10px 22px rgba(0, 0, 0, 0.55);
+  z-index: 3;
+  opacity: 0;
+  will-change: transform, opacity;
+  animation: ac-steal-card var(--ac-dur) cubic-bezier(0.22, 1, 0.36, 1) forwards;
+}
+
+.ac-family-steal .ac-secondary-prop.is-prop-card .ac-prop-img {
+  height: 100%;
+  object-fit: cover;
+}
+
+.ac-family-steal .ac-hero-track {
+  animation: ac-steal-swoop var(--ac-dur) cubic-bezier(0.22, 1, 0.36, 1) forwards;
+}
+
+@keyframes ac-steal-swoop {
+  0% { opacity: 0; transform: translate3d(-180px, -24px, 0) rotate(-14deg) scale(0.84); }
+  34% { opacity: 1; transform: translate3d(-8px, 6px, 0) rotate(2deg) scale(1.06); }
+  76% { opacity: 1; transform: translate3d(92px, -12px, 0) rotate(10deg) scale(1); }
+  100% { opacity: 0; transform: translate3d(200px, -24px, 0) rotate(16deg) scale(0.88); }
+}
+
+@keyframes ac-steal-card {
+  0% { opacity: 0; transform: translate3d(0, 12px, 0) scale(0.8); }
+  22% { opacity: 1; transform: translate3d(0, 0, 0) rotate(-4deg) scale(1); }
+  38% { opacity: 1; transform: translate3d(12px, -4px, 0) rotate(6deg) scale(1.04); }
+  78% { opacity: 0.95; transform: translate3d(118px, -18px, 0) rotate(14deg) scale(0.92); }
+  100% { opacity: 0; transform: translate3d(206px, -30px, 0) rotate(18deg) scale(0.75); }
+}
+
+/* ══════════════════════════════════════════════════════════
+   9. BLIND — Chimp Blindfold Drops Dramatically
+   ══════════════════════════════════════════════════════════ */
+.ac-family-blind .ac-hero-track {
+  animation: ac-blind-drop var(--ac-dur) cubic-bezier(0.18, 0.92, 0.28, 1) forwards;
+}
+
+@keyframes ac-blind-drop {
+  0% { opacity: 0; transform: translate3d(0, -140px, 0) scale(0.85) rotate(-8deg); }
+  24% { opacity: 1; transform: translate3d(0, 6px, 0) scale(1.08) rotate(3deg); }
+  36% { opacity: 1; transform: translate3d(0, -4px, 0) scale(1) rotate(-2deg); }
+  78% { opacity: 1; transform: translate3d(0, 0, 0) scale(1.02) rotate(0deg); }
+  100% { opacity: 0; transform: translate3d(0, 18px, 0) scale(0.88); }
+}
+
+/* ══════════════════════════════════════════════════════════
+   10. MARK — Red Pushpin Stabs Onto Card Back
+   ══════════════════════════════════════════════════════════ */
+.ac-family-mark .ac-secondary-prop.is-prop-card {
+  position: absolute;
+  left: 50%;
+  top: 48%;
+  width: 78px;
+  height: 110px;
+  margin-left: -39px;
+  margin-top: -55px;
+  border-radius: 10px;
+  overflow: hidden;
+  border: 1.5px solid rgba(246, 201, 94, 0.8);
+  box-shadow: 0 10px 22px rgba(0, 0, 0, 0.55);
+  z-index: 3;
+  opacity: 0;
+  will-change: transform, opacity;
+  animation: ac-mark-card var(--ac-dur) cubic-bezier(0.22, 1, 0.36, 1) forwards;
+}
+
+.ac-family-mark .ac-secondary-prop.is-prop-card .ac-prop-img {
+  height: 100%;
+  object-fit: cover;
+}
+
+.ac-family-mark .ac-hero-track {
+  width: 104px;
+  margin-left: -42px;
+  margin-top: -102px;
+  animation: ac-pin-stab var(--ac-dur) cubic-bezier(0.16, 1, 0.3, 1) forwards;
+}
+
+@keyframes ac-mark-card {
+  0% { opacity: 0; transform: scale(0.75) rotate(-6deg); }
+  22% { opacity: 1; transform: scale(1) rotate(-3deg); }
+  34% { opacity: 1; transform: scale(0.95) rotate(-3deg); }
+  78% { opacity: 1; transform: scale(1) rotate(-2deg); }
+  100% { opacity: 0; transform: scale(0.86) rotate(0deg); }
+}
+
+@keyframes ac-pin-stab {
+  0%, 10% { opacity: 0; transform: translate3d(26px, -110px, 0) rotate(18deg) scale(1.25); }
+  30% { opacity: 1; transform: translate3d(0, 0, 0) rotate(4deg) scale(0.96); }
+  40% { opacity: 1; transform: translate3d(0, -4px, 0) rotate(6deg) scale(1.02); }
+  78% { opacity: 1; transform: translate3d(0, -2px, 0) rotate(6deg) scale(1); }
+  100% { opacity: 0; transform: translate3d(0, -18px, 0) scale(0.84); }
+}
+
+/* ══════════════════════════════════════════════════════════
+   11. DIG / BURY / SWAP — Shovel Scoops/Flips Card Back
+   ══════════════════════════════════════════════════════════ */
+.ac-family-dig .ac-secondary-prop.is-prop-card {
+  position: absolute;
+  left: 50%;
+  top: 48%;
+  width: 72px;
+  height: 102px;
+  margin-left: -36px;
+  margin-top: -51px;
+  border-radius: 10px;
+  overflow: hidden;
+  border: 1.5px solid rgba(246, 201, 94, 0.78);
+  box-shadow: 0 10px 22px rgba(0, 0, 0, 0.55);
+  z-index: 3;
+  opacity: 0;
+  will-change: transform, opacity;
+  animation: ac-dig-card var(--ac-dur) cubic-bezier(0.22, 1, 0.36, 1) forwards;
+}
+
+.ac-family-dig .ac-secondary-prop.is-prop-card .ac-prop-img {
+  height: 100%;
+  object-fit: cover;
+}
+
+.ac-family-dig .ac-hero-track {
+  animation: ac-shovel-scoop var(--ac-dur) cubic-bezier(0.22, 1, 0.36, 1) forwards;
+}
+
+@keyframes ac-shovel-scoop {
+  0% { opacity: 0; transform: translate3d(-110px, -60px, 0) rotate(-32deg) scale(0.85); }
+  28% { opacity: 1; transform: translate3d(-14px, 14px, 0) rotate(-8deg) scale(1.06); }
+  54% { opacity: 1; transform: translate3d(18px, -16px, 0) rotate(14deg) scale(1.04); }
+  80% { opacity: 1; transform: translate3d(8px, -6px, 0) rotate(8deg) scale(0.98); }
+  100% { opacity: 0; transform: translate3d(44px, -34px, 0) rotate(20deg) scale(0.84); }
+}
+
+@keyframes ac-dig-card {
+  0% { opacity: 0; transform: translate3d(0, 20px, 0) scale(0.76); }
+  26% { opacity: 1; transform: translate3d(0, 4px, 0) rotate(-6deg) scale(1); }
+  54% { opacity: 1; transform: translate3d(14px, -28px, 0) rotate(172deg) scale(1.06); }
+  80% { opacity: 1; transform: translate3d(6px, -6px, 0) rotate(180deg) scale(0.96); }
+  100% { opacity: 0; transform: translate3d(0, 14px, 0) rotate(180deg) scale(0.8); }
+}
+
+/* ══════════════════════════════════════════════════════════
+   12. TOWER — Royal Crown Descends
+   ══════════════════════════════════════════════════════════ */
+.ac-family-tower .ac-hero-track {
+  animation: ac-crown-descend var(--ac-dur) cubic-bezier(0.2, 0.9, 0.28, 1) forwards;
+}
+
+@keyframes ac-crown-descend {
+  0% { opacity: 0; transform: translate3d(0, -135px, 0) scale(0.75) rotate(-8deg); }
+  28% { opacity: 1; transform: translate3d(0, 6px, 0) scale(1.1) rotate(3deg); }
+  44% { opacity: 1; transform: translate3d(0, -4px, 0) scale(1.02) rotate(0deg); }
+  78% { opacity: 1; transform: translate3d(0, 0, 0) scale(1.05) rotate(0deg); }
+  100% { opacity: 0; transform: translate3d(0, -14px, 0) scale(0.9); }
+}
+
+/* ══════════════════════════════════════════════════════════
+   13. ZOMBIE — Erupts Upward From Bottom
+   ══════════════════════════════════════════════════════════ */
+.ac-family-zombie .ac-hero-track {
+  animation: ac-zombie-erupt var(--ac-dur) cubic-bezier(0.18, 0.92, 0.28, 1) forwards;
+}
+
+.ac-family-zombie .ac-hero-img {
+  -webkit-mask-image: linear-gradient(to bottom, #000 0%, #000 84%, transparent 100%);
+  mask-image: linear-gradient(to bottom, #000 0%, #000 84%, transparent 100%);
+}
+
+@keyframes ac-zombie-erupt {
+  0% { opacity: 0; transform: translate3d(0, 170px, 0) rotate(-10deg) scale(0.78); }
+  26% { opacity: 1; transform: translate3d(0, -10px, 0) rotate(4deg) scale(1.08); }
+  42% { opacity: 1; transform: translate3d(-4px, 2px, 0) rotate(-3deg) scale(1.02); }
+  76% { opacity: 1; transform: translate3d(0, -4px, 0) rotate(2deg) scale(1.04); }
+  100% { opacity: 0; transform: translate3d(0, 86px, 0) rotate(-6deg) scale(0.86); }
+}
+
+/* ══════════════════════════════════════════════════════════
+   14. BARKING — 2-Stage Card Reveal -> Dog Lunges Forward
+   ══════════════════════════════════════════════════════════ */
+.ac-family-barking {
+  --ac-dur: 1750ms;
+}
+
+.ac-intro-card {
+  position: absolute;
+  left: 50%;
+  top: 46%;
+  width: 108px;
+  height: 152px;
+  margin-left: -54px;
+  margin-top: -76px;
+  border-radius: 11px;
+  overflow: hidden;
+  border: 2px solid #ffe58f;
+  box-shadow: 0 12px 26px rgba(0, 0, 0, 0.6);
+  background: #1a2822;
+  z-index: 5;
+  opacity: 0;
+  will-change: transform, opacity;
+  animation: ac-intro-card-reveal var(--ac-dur) cubic-bezier(0.22, 1, 0.36, 1) forwards;
+}
+
+.ac-intro-card-img {
+  display: block;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  user-select: none;
+  -webkit-user-drag: none;
+}
+
+@keyframes ac-intro-card-reveal {
+  0% {
+    opacity: 0;
+    transform: translate3d(0, 0, 0) scale(1.45) rotate(-6deg);
+  }
+  14% {
+    opacity: 1;
+    transform: translate3d(0, 0, 0) scale(1) rotate(0deg);
+  }
+  36% {
+    opacity: 1;
+    transform: translate3d(0, 0, 0) scale(1) rotate(0deg);
+  }
+  46%, 100% {
+    opacity: 0;
+    transform: translate3d(0, 0, 0) scale(0.72) rotate(4deg);
+  }
+}
+
+.ac-family-barking .ac-hero-orient {
+  transform: scaleX(var(--ac-dog-flip));
+}
+
+.ac-family-barking .ac-hero-track {
+  animation: ac-dog-lunge var(--ac-dur) cubic-bezier(0.18, 0.92, 0.28, 1) forwards;
+}
+
+.ac-family-barking .ac-ring {
+  animation: ac-bark-ring var(--ac-dur) cubic-bezier(0.16, 1, 0.3, 1) forwards;
+}
+
+.ac-family-barking .ac-ring-b {
+  animation-delay: 80ms;
+}
+
+.ac-family-barking .ac-banner {
+  animation: ac-bark-banner-slam var(--ac-dur) cubic-bezier(0.2, 0.9, 0.25, 1) forwards;
+}
+
+@keyframes ac-bark-ring {
+  0%, 35% { opacity: 0; transform: scale(0.32); }
+  48% { opacity: 0.92; transform: scale(0.95); }
+  85%, 100% { opacity: 0; transform: scale(2.05); }
+}
+
+@keyframes ac-bark-banner-slam {
+  0%, 35% {
+    opacity: 0;
+    transform: translate3d(-50%, 16px, 0) scale(1.4);
+  }
+  46% {
+    opacity: 1;
+    transform: translate3d(-50%, 0, 0) scale(0.96);
+  }
+  54% {
+    opacity: 1;
+    transform: translate3d(-50%, 0, 0) scale(1.03);
+  }
+  84% {
+    opacity: 1;
+    transform: translate3d(-50%, 0, 0) scale(1);
+  }
+  100% {
+    opacity: 0;
+    transform: translate3d(-50%, -10px, 0) scale(0.94);
+  }
+}
+
+@keyframes ac-dog-lunge {
+  0%, 35% { opacity: 0; transform: translate3d(-110px, 24px, 0) scale(0.55) rotate(-8deg); }
+  48% { opacity: 1; transform: translate3d(10px, -6px, 0) scale(1.18) rotate(4deg); }
+  58% { opacity: 1; transform: translate3d(-6px, 2px, 0) scale(1.04) rotate(-3deg); }
+  70% { opacity: 1; transform: translate3d(4px, -2px, 0) scale(1.1) rotate(2deg); }
+  86% { opacity: 1; transform: translate3d(0, 0, 0) scale(1.04) rotate(0deg); }
+  100% { opacity: 0; transform: translate3d(44px, -12px, 0) scale(0.86); }
+}
+
+/* ══════════════════════════════════════════════════════════
+   15. POTLUCK / GARBAGE COLLECTION / GRAVE ROBBER — 3 Cards Swirl Inward
+   ══════════════════════════════════════════════════════════ */
+.ac-swirl-cards {
+  position: absolute;
+  left: 50%;
+  top: 46%;
+  width: 0;
+  height: 0;
+  z-index: 4;
+}
+
+.ac-swirl-card.c1 { animation: ac-swirl-1 var(--ac-dur) cubic-bezier(0.22, 1, 0.36, 1) forwards; }
+.ac-swirl-card.c2 { animation: ac-swirl-2 var(--ac-dur) cubic-bezier(0.22, 1, 0.36, 1) forwards; }
+.ac-swirl-card.c3 { animation: ac-swirl-3 var(--ac-dur) cubic-bezier(0.22, 1, 0.36, 1) forwards; }
+
+@keyframes ac-swirl-1 {
+  0% { opacity: 0; transform: translate3d(-180px, -74px, 0) rotate(-38deg) scale(0.75); }
+  34% { opacity: 1; transform: translate3d(-52px, -14px, 0) rotate(-14deg) scale(1.04); }
+  72% { opacity: 1; transform: translate3d(-14px, 4px, 0) rotate(-6deg) scale(0.95); }
+  100% { opacity: 0; transform: translate3d(0, 0, 0) rotate(0deg) scale(0.65); }
+}
+
+@keyframes ac-swirl-2 {
+  0% { opacity: 0; transform: translate3d(180px, -68px, 0) rotate(38deg) scale(0.75); }
+  34% { opacity: 1; transform: translate3d(52px, -12px, 0) rotate(14deg) scale(1.04); }
+  72% { opacity: 1; transform: translate3d(14px, 4px, 0) rotate(6deg) scale(0.95); }
+  100% { opacity: 0; transform: translate3d(0, 0, 0) rotate(0deg) scale(0.65); }
+}
+
+@keyframes ac-swirl-3 {
+  0% { opacity: 0; transform: translate3d(0, 140px, 0) rotate(20deg) scale(0.75); }
+  34% { opacity: 1; transform: translate3d(0, 26px, 0) rotate(4deg) scale(1.08); }
+  72% { opacity: 1; transform: translate3d(0, 0, 0) rotate(0deg) scale(0.98); }
+  100% { opacity: 0; transform: translate3d(0, -10px, 0) rotate(0deg) scale(0.65); }
+}
+
+/* ══════════════════════════════════════════════════════════
+   16. CATOMIC BOMB / ARMAGEDDON — Bomb Warning Flash
+   ══════════════════════════════════════════════════════════ */
+.ac-family-catomic .ac-hero-track {
+  animation: ac-catomic-pulse var(--ac-dur) cubic-bezier(0.2, 0.9, 0.25, 1) forwards;
+}
+
+@keyframes ac-catomic-pulse {
+  0% { opacity: 0; transform: scale(0.4) rotate(-12deg); }
+  18% { opacity: 1; transform: scale(1.18) rotate(5deg); }
+  30% { opacity: 1; transform: scale(0.98) rotate(-4deg); }
+  46% { opacity: 1; transform: scale(1.14) rotate(3deg); }
+  62% { opacity: 1; transform: scale(1.02) rotate(-2deg); }
+  100% { opacity: 0; transform: scale(1.3) rotate(0deg); }
+}
+
+/* ══════════════════════════════════════════════════════════
+   17. CLONE — Mirror Split From Clone Card Into Copied Card
+   ══════════════════════════════════════════════════════════ */
+.ac-family-clone {
+  --ac-dur: 1450ms;
+}
+
+.ac-clone-beam {
+  position: absolute;
+  left: 50%;
+  top: 46%;
+  width: 8px;
+  height: 158px;
+  margin-left: -4px;
+  margin-top: -79px;
+  border-radius: 999px;
+  background: linear-gradient(180deg, transparent 0%, #7dd3fc 25%, #ffffff 50%, #38bdf8 75%, transparent 100%);
+  z-index: 6;
+  opacity: 0;
+  will-change: transform, opacity;
+  animation: ac-clone-scan var(--ac-dur) cubic-bezier(0.22, 1, 0.36, 1) forwards;
+}
+
+.ac-family-clone .ac-hero-track {
+  width: 96px;
+  height: 136px;
+  margin-left: -48px;
+  margin-top: -68px;
+  z-index: 4;
+  animation: ac-clone-source var(--ac-dur) cubic-bezier(0.22, 1, 0.36, 1) forwards;
+}
+
+.ac-family-clone .ac-hero-orient {
+  height: 100%;
+  border-radius: 10px;
+  overflow: hidden;
+  border: 2px solid #7dd3fc;
+  box-shadow: 0 10px 22px rgba(0, 0, 0, 0.56);
+  background: #0b2230;
+}
+
+.ac-family-clone .ac-hero-img {
+  height: 100%;
+  max-height: none;
+  object-fit: cover;
+}
+
+.ac-family-clone .ac-secondary-prop.is-prop-card {
+  position: absolute;
+  left: 50%;
+  top: 46%;
+  width: 96px;
+  height: 136px;
+  margin-left: -48px;
+  margin-top: -68px;
+  border-radius: 10px;
+  overflow: hidden;
+  border: 2px solid #ffe58f;
+  box-shadow: 0 12px 24px rgba(0, 0, 0, 0.58);
+  background: #102a24;
+  z-index: 5;
+  opacity: 0;
+  will-change: transform, opacity;
+  animation: ac-clone-mirror var(--ac-dur) cubic-bezier(0.22, 1, 0.36, 1) forwards;
+}
+
+.ac-family-clone .ac-secondary-prop.is-prop-card .ac-prop-img {
+  height: 100%;
+  object-fit: cover;
+}
+
+@keyframes ac-clone-scan {
+  0%, 16% { opacity: 0; transform: translate3d(-44px, 0, 0) scaleY(0.5); }
+  28% { opacity: 1; transform: translate3d(0px, 0, 0) scaleY(1.1); }
+  48% { opacity: 0.9; transform: translate3d(48px, 0, 0) scaleY(1); }
+  62%, 100% { opacity: 0; transform: translate3d(72px, 0, 0) scaleY(0.5); }
+}
+
+@keyframes ac-clone-source {
+  0% { opacity: 0; transform: translate3d(0, 14px, 0) scale(0.7); }
+  18% { opacity: 1; transform: translate3d(0, 0, 0) scale(1); }
+  36% { opacity: 1; transform: translate3d(-60px, 0, 0) rotate(-6deg) scale(0.96); }
+  78% { opacity: 0.92; transform: translate3d(-60px, 0, 0) rotate(-6deg) scale(0.95); }
+  100% { opacity: 0; transform: translate3d(-76px, -10px, 0) scale(0.8); }
+}
+
+@keyframes ac-clone-mirror {
+  0%, 24% { opacity: 0; transform: translate3d(-24px, 0, 0) scaleX(0.2) scaleY(0.9); }
+  42% { opacity: 1; transform: translate3d(62px, -4px, 0) rotate(6deg) scale(1.06); }
+  54% { opacity: 1; transform: translate3d(60px, 0, 0) rotate(5deg) scale(1); }
+  78% { opacity: 1; transform: translate3d(60px, 0, 0) rotate(5deg) scale(1); }
+  100% { opacity: 0; transform: translate3d(78px, -10px, 0) scale(0.82); }
+}
+
+/* ══════════════════════════════════════════════════════════
+   18. COMBO (PAIR & TRIPLE) — Fanned Cats Slam + Sneaky Burglar
+   ══════════════════════════════════════════════════════════ */
+.ac-family-combo {
+  --ac-dur: 1400ms;
+}
+
+.ac-combo-fan {
+  position: absolute;
+  left: 50%;
+  top: 46%;
+  width: 0;
+  height: 0;
+  z-index: 4;
+}
+
+.ac-combo-card {
+  position: absolute;
+  width: 82px;
+  height: 116px;
+  margin-left: -41px;
+  margin-top: -58px;
+  border-radius: 10px;
+  overflow: hidden;
+  border: 2px solid rgba(255, 224, 130, 0.9);
+  box-shadow: 0 10px 22px rgba(0, 0, 0, 0.58);
+  background: #1a2822;
+  opacity: 0;
+  will-change: transform, opacity;
+}
+
+.ac-combo-fan.is-count-2 .cc1 { animation: ac-pair-1 var(--ac-dur) cubic-bezier(0.2, 0.92, 0.28, 1) forwards; }
+.ac-combo-fan.is-count-2 .cc2 { animation: ac-pair-2 var(--ac-dur) cubic-bezier(0.2, 0.92, 0.28, 1) forwards; }
+.ac-combo-fan.is-count-3 .cc1 { animation: ac-triple-1 var(--ac-dur) cubic-bezier(0.2, 0.92, 0.28, 1) forwards; }
+.ac-combo-fan.is-count-3 .cc2 { animation: ac-triple-2 var(--ac-dur) cubic-bezier(0.2, 0.92, 0.28, 1) forwards; }
+.ac-combo-fan.is-count-3 .cc3 { animation: ac-triple-3 var(--ac-dur) cubic-bezier(0.2, 0.92, 0.28, 1) forwards; }
+
+@keyframes ac-pair-1 {
+  0% { opacity: 0; transform: translate3d(-96px, 44px, 0) rotate(-24deg) scale(1.25); }
+  22% { opacity: 1; transform: translate3d(-34px, 0, 0) rotate(-11deg) scale(1); }
+  78% { opacity: 1; transform: translate3d(-34px, 0, 0) rotate(-10deg) scale(1); }
+  100% { opacity: 0; transform: translate3d(-44px, -12px, 0) scale(0.84); }
+}
+
+@keyframes ac-pair-2 {
+  0%, 6% { opacity: 0; transform: translate3d(96px, 44px, 0) rotate(24deg) scale(1.25); }
+  28% { opacity: 1; transform: translate3d(34px, 0, 0) rotate(11deg) scale(1); }
+  78% { opacity: 1; transform: translate3d(34px, 0, 0) rotate(10deg) scale(1); }
+  100% { opacity: 0; transform: translate3d(44px, -12px, 0) scale(0.84); }
+}
+
+@keyframes ac-triple-1 {
+  0% { opacity: 0; transform: translate3d(-110px, 44px, 0) rotate(-28deg) scale(1.25); }
+  22% { opacity: 1; transform: translate3d(-66px, 6px, 0) rotate(-16deg) scale(0.98); }
+  78% { opacity: 1; transform: translate3d(-64px, 6px, 0) rotate(-15deg) scale(0.98); }
+  100% { opacity: 0; transform: translate3d(-74px, -8px, 0) scale(0.82); }
+}
+
+@keyframes ac-triple-2 {
+  0%, 6% { opacity: 0; transform: translate3d(0, 64px, 0) scale(1.3); }
+  26% { opacity: 1; transform: translate3d(0, -10px, 0) rotate(0deg) scale(1.06); }
+  78% { opacity: 1; transform: translate3d(0, -10px, 0) rotate(0deg) scale(1.04); }
+  100% { opacity: 0; transform: translate3d(0, -24px, 0) scale(0.86); }
+}
+
+@keyframes ac-triple-3 {
+  0%, 10% { opacity: 0; transform: translate3d(110px, 44px, 0) rotate(28deg) scale(1.25); }
+  30% { opacity: 1; transform: translate3d(66px, 6px, 0) rotate(16deg) scale(0.98); }
+  78% { opacity: 1; transform: translate3d(64px, 6px, 0) rotate(15deg) scale(0.98); }
+  100% { opacity: 0; transform: translate3d(74px, -8px, 0) scale(0.82); }
+}
+
+.ac-family-combo .ac-hero-track {
+  width: clamp(104px, 18%, 138px);
+  margin-left: 36px;
+  margin-top: -116px;
+  z-index: 6;
+  animation: ac-combo-burglar var(--ac-dur) cubic-bezier(0.22, 1, 0.36, 1) forwards;
+}
+
+@keyframes ac-combo-burglar {
+  0%, 16% { opacity: 0; transform: translate3d(66px, -20px, 0) scale(0.8); }
+  36% { opacity: 1; transform: translate3d(0, 0, 0) rotate(-4deg) scale(1.04); }
+  76% { opacity: 1; transform: translate3d(-4px, 2px, 0) rotate(-2deg) scale(1); }
+  100% { opacity: 0; transform: translate3d(26px, -16px, 0) scale(0.84); }
+}
+
+/* ══════════════════════════════════════════════════════════
+   19. IMPLODING ARMED — Card Back Flips Into Face-Up Cosmic Warning
+   ══════════════════════════════════════════════════════════ */
+.ac-family-imploding_arm {
+  --ac-dur: 1650ms;
+}
+
+.ac-family-imploding_arm .ac-secondary-prop.is-prop-flipback {
+  position: absolute;
+  left: 50%;
+  top: 46%;
+  width: 102px;
+  height: 144px;
+  margin-left: -51px;
+  margin-top: -72px;
+  border-radius: 11px;
+  overflow: hidden;
+  border: 2px solid #56e6ff;
+  box-shadow: 0 12px 24px rgba(0, 0, 0, 0.62);
+  z-index: 4;
+  opacity: 0;
+  will-change: transform, opacity;
+  animation: ac-implode-back-flip var(--ac-dur) cubic-bezier(0.22, 1, 0.36, 1) forwards;
+}
+
+.ac-family-imploding_arm .ac-secondary-prop.is-prop-flipback .ac-prop-img {
+  height: 100%;
+  object-fit: cover;
+}
+
+.ac-family-imploding_arm .ac-hero-track {
+  width: 106px;
+  height: 150px;
+  margin-left: -53px;
+  margin-top: -75px;
+  z-index: 5;
+  animation: ac-implode-face-reveal var(--ac-dur) cubic-bezier(0.22, 1, 0.36, 1) forwards;
+}
+
+.ac-family-imploding_arm .ac-hero-orient {
+  height: 100%;
+  border-radius: 11px;
+  overflow: hidden;
+  border: 2.5px solid #e879f9;
+  box-shadow: 0 14px 28px rgba(88, 28, 135, 0.65);
+  background: #0d061a;
+}
+
+.ac-family-imploding_arm .ac-hero-img {
+  height: 100%;
+  max-height: none;
+  object-fit: cover;
+}
+
+@keyframes ac-implode-back-flip {
+  0% { opacity: 0; transform: scale(0.75) rotate(-6deg); }
+  12% { opacity: 1; transform: scale(1) rotate(0deg); }
+  24% { opacity: 1; transform: scaleX(0.05) scaleY(1.06); }
+  26%, 100% { opacity: 0; transform: scaleX(0.05) scaleY(1.06); }
+}
+
+@keyframes ac-implode-face-reveal {
+  0%, 23% { opacity: 0; transform: scaleX(0.05) scaleY(1.06); }
+  36% { opacity: 1; transform: scaleX(1.1) scaleY(1.1); }
+  48% { opacity: 1; transform: scale(1) rotate(2deg); }
+  62% { opacity: 1; transform: scale(1.04) rotate(-2deg); }
+  80% { opacity: 1; transform: scale(1) rotate(0deg); }
+  100% { opacity: 0; transform: scale(0.84) rotate(4deg); }
+}
+
+/* ══════════════════════════════════════════════════════════
+   20. FAVOR CALL — Businessman Steps Up Friendly To Demand Card
+   ══════════════════════════════════════════════════════════ */
+.ac-family-favor {
+  --ac-dur: 1320ms;
+}
+
+.ac-family-favor .ac-hero-track {
+  width: clamp(146px, 26%, 192px);
+  margin-left: -96px;
+  margin-top: -102px;
+  animation: ac-favor-step-up var(--ac-dur) cubic-bezier(0.2, 0.92, 0.28, 1) forwards;
+}
+
+@keyframes ac-favor-step-up {
+  0% { opacity: 0; transform: translate3d(0, 92px, 0) scale(0.74); }
+  22% { opacity: 1; transform: translate3d(0, -10px, 0) scale(1.06); }
+  36% { opacity: 1; transform: translate3d(0, 0, 0) scale(1); }
+  78% { opacity: 1; transform: translate3d(0, -2px, 0) scale(1.02); }
+  100% { opacity: 0; transform: translate3d(0, 24px, 0) scale(0.88); }
+}
+
+@media (max-width: 900px) {
+  .ac-intro-card {
+    width: 84px;
+    height: 118px;
+    margin-left: -42px;
+    margin-top: -59px;
+  }
+  .ac-combo-card {
+    width: 64px;
+    height: 92px;
+    margin-left: -32px;
+    margin-top: -46px;
+  }
+  .ac-family-clone .ac-hero-track,
+  .ac-family-clone .ac-secondary-prop.is-prop-card,
+  .ac-family-imploding_arm .ac-hero-track,
+  .ac-family-imploding_arm .ac-secondary-prop.is-prop-flipback {
+    width: 78px;
+    height: 110px;
+    margin-left: -39px;
+    margin-top: -55px;
+  }
+  .ac-clone-beam {
+    height: 128px;
+    margin-top: -64px;
+  }
+  .ac-hero-track {
+    width: clamp(106px, 30%, 148px);
+    margin-left: -68px;
+    margin-top: -68px;
+  }
+  .ac-family-skip .ac-hero-track {
+    width: clamp(114px, 32%, 158px);
+    margin-left: -74px;
+    margin-top: -74px;
+  }
+  .ac-family-favor .ac-hero-track {
+    width: clamp(110px, 30%, 150px);
+    margin-left: -72px;
+    margin-top: -78px;
+  }
+  .ac-family-combo .ac-hero-track {
+    width: clamp(82px, 22%, 110px);
+    margin-left: 24px;
+    margin-top: -92px;
+  }
+  .ac-stamp {
+    font-size: clamp(15px, 4.2vw, 20px);
+    padding: 5px 14px;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .action-cutscene-layer {
+    display: none !important;
+  }
+}

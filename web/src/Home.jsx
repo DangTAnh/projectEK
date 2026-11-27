@@ -1,83 +1,257 @@
 import React, { useEffect, useState } from 'react'
-import { createRoom, listRooms, store } from './api.js'
+import { createRoom, getHealth, getRoom, listRooms, store } from './api.js'
+import RealIcon from './components/RealIcon.jsx'
+import CatAvatar from './components/CatAvatar.jsx'
+import CatCustomizerModal from './components/CatCustomizerModal.jsx'
+import { loadSavedAvatar, saveAvatar } from './utils/catAvatar.js'
 
 export default function Home() {
   const [name, setName] = useState(() => store.get('ek_name'))
+  const [avatar, setAvatar] = useState(() => loadSavedAvatar(store.get('ek_name')))
+  const [catOpen, setCatOpen] = useState(false)
+  const [roomCode, setRoomCode] = useState('')
   const [rooms, setRooms] = useState([])
+  const [loadingRooms, setLoadingRooms] = useState(true)
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState('')
+  const [debugEnabled, setDebugEnabled] = useState(false)
 
   useEffect(() => {
-    listRooms().then((d) => setRooms(Array.isArray(d) ? d : [])).catch(() => {})
-    const t = setInterval(() => listRooms().then((d) => setRooms(Array.isArray(d) ? d : [])).catch(() => {}), 3000)
-    return () => clearInterval(t)
+    let mounted = true
+    getHealth()
+      .then((h) => {
+        if (mounted && h?.debug_enabled) setDebugEnabled(true)
+      })
+      .catch(() => {})
+    const load = () => listRooms()
+      .then((d) => {
+        if (!mounted) return
+        setRooms(Array.isArray(d) ? d : [])
+        setLoadingRooms(false)
+      })
+      .catch(() => {
+        if (mounted) setLoadingRooms(false)
+      })
+    load()
+    const t = setInterval(load, 3000)
+    return () => { mounted = false; clearInterval(t) }
   }, [])
 
-  function enter(path) {
-    if (!name.trim()) return alert('Nhập tên của bạn trước!')
-    store.set('ek_name', name.trim())
-    location.href = path
+  function requireName() {
+    const clean = name.trim()
+    if (!clean) {
+      setError('Vui lòng nhập tên của bạn trước!')
+      return ''
+    }
+    store.set('ek_name', clean)
+    return clean
+  }
+
+  async function joinCode(rawCode, skipCheck = false) {
+    const cleanName = requireName()
+    if (!cleanName) return
+    const cleanCode = (rawCode || '').trim().toUpperCase()
+    if (!cleanCode) {
+      setError('Vui lòng nhập mã phòng (4 ký tự).')
+      return
+    }
+    setError('')
+    if (!skipCheck) {
+      setBusy(true)
+      try {
+        const info = await getRoom(cleanCode)
+        if (!info) {
+          setError(`Không tìm thấy phòng ${cleanCode}.`)
+          return
+        }
+        const maxPlayers = info.max_players ?? 9
+        if (info.started) {
+          const hasSession = !!store.get(`ek_session:${cleanCode}:${cleanName}`)
+          if (!hasSession) {
+            setError(`Phòng ${cleanCode} đã bắt đầu chơi (chỉ người chơi cũ mới kết nối lại được).`)
+            return
+          }
+        } else if ((info.player_count ?? 0) >= maxPlayers) {
+          setError(`Phòng ${cleanCode} đã đầy (${info.player_count}/${maxPlayers}).`)
+          return
+        }
+      } catch {
+        // Nếu endpoint kiểm tra chưa sẵn sàng hoặc lỗi mạng tạm thời, để WS xử lý tiếp
+      } finally {
+        setBusy(false)
+      }
+    }
+    location.href = `/?room=${encodeURIComponent(cleanCode)}`
   }
 
   async function onCreate() {
-    if (!name.trim()) return alert('Nhập tên của bạn trước!')
+    if (!requireName()) return
     setBusy(true)
     setError('')
-    store.set('ek_name', name.trim())
     try {
       const code = await createRoom()
-      location.href = `/?room=${code}`
+      location.href = `/?room=${encodeURIComponent(code)}`
     } catch (e) {
-      setError('Không tạo được phòng — kiểm tra server rồi thử lại.')
+      setError(e?.message || 'Không tạo được phòng — kiểm tra server rồi thử lại.')
     } finally {
       setBusy(false)
     }
   }
 
+  const openRooms = rooms.filter((r) => !r.started)
+  const playingRooms = rooms.filter((r) => r.started)
+
   return (
-    <div className="home">
-      <h1>💥 Exploding Kitty</h1>
-      <p className="tagline">Rút thẻ — đừng để nổ!</p>
-      <div className="panel">
-        <input
-          placeholder="Tên của bạn"
-          value={name}
-          onChange={(e) => setName(e.target.value)}
-          maxLength={64}
-        />
-        <div className="row">
-          <button onClick={onCreate} disabled={busy}>Tạo phòng mới</button>
+    <main className="home">
+      <header className="home-hero">
+        <div className="home-hero-top">
+          <div className="home-badge">2–9 người chơi · Trực tuyến</div>
+          {debugEnabled && (
+            <a className="home-debug-link" href="/?debug=1" title="Mở Debug Studio">
+              <RealIcon name="wrench" size={14} /> Debug Studio
+            </a>
+          )}
         </div>
-        {error && <p className="error">{error}</p>}
-        <div className="join-row">
-          <input
-            placeholder="Mã phòng"
-            maxLength={4}
-            style={{ textTransform: 'uppercase' }}
-            onKeyDown={(e) => e.key === 'Enter' && enter(`/?room=${e.target.value.trim().toUpperCase()}`)}
-            onChange={(e) => { e.target.value = e.target.value.toUpperCase() }}
-            id="code-input"
-          />
+        <h1>Exploding Kitty</h1>
+        <p className="tagline">Rút bài chiến thuật — tránh mèo nổ, sống sót đến cuối cùng.</p>
+      </header>
+
+      <section className="panel" aria-label="Tạo hoặc vào phòng">
+        <div className="home-cat-row">
           <button
-            onClick={() =>
-              enter(`/?room=${document.getElementById('code-input').value.trim().toUpperCase()}`)
-            }
+            type="button"
+            className="home-cat-preview"
+            onClick={() => setCatOpen(true)}
+            title="Bấm để tùy chỉnh nhân vật mèo"
           >
-            Vào phòng
+            <CatAvatar avatar={avatar} name={name || 'Mèo'} size={66} className="home-cat-svg" />
+            <span className="home-cat-plate">{name.trim() || 'Mèo của bạn'}</span>
           </button>
+          <div className="home-cat-copy">
+            <strong>Mèo đại diện của bạn</strong>
+            <button type="button" className="secondary-btn home-cat-btn" onClick={() => setCatOpen(true)}>
+              Độ mèo ngay
+            </button>
+          </div>
         </div>
-      </div>
-      <h2>Phòng đang mở</h2>
-      <ul className="room-list">
-        {rooms.filter((r) => !r.started).map((r) => (
-          <li key={r.code}>
-            <span className="code">{r.code}</span>
-            <span className="count">{r.player_count ?? 0}/9 người</span>
-            <button onClick={() => enter(`/?room=${r.code}`)}>Vào</button>
-          </li>
-        ))}
-        {!rooms.some((r) => !r.started) && <li className="empty">Chưa có phòng nào — hãy tạo!</li>}
-      </ul>
-    </div>
+
+        <div className="field-group">
+          <label className="field-label" htmlFor="player-name-input">Tên người chơi</label>
+          <input
+            id="player-name-input"
+            aria-label="Tên của bạn"
+            placeholder="Nhập tên hiển thị…"
+            value={name}
+            onChange={(e) => { setName(e.target.value); if (error) setError('') }}
+            onKeyDown={(e) => { if (e.key === 'Enter' && !busy) onCreate() }}
+            maxLength={64}
+            autoFocus
+          />
+        </div>
+
+        <button type="button" className="primary full-btn home-create-btn" onClick={onCreate} disabled={busy}>
+          {busy ? 'Đang xử lý…' : 'Tạo phòng mới'}
+        </button>
+
+        <div className="home-divider" aria-hidden="true">
+          <span>hoặc vào bằng mã phòng</span>
+        </div>
+
+        <form
+          className="join-row"
+          onSubmit={(e) => {
+            e.preventDefault()
+            joinCode(roomCode)
+          }}
+        >
+          <input
+            aria-label="Mã phòng"
+            placeholder="MÃ PHÒNG (VD: ABCD)"
+            maxLength={4}
+            value={roomCode}
+            style={{ textTransform: 'uppercase' }}
+            onChange={(e) => {
+              setRoomCode(e.target.value.toUpperCase().replace(/[^A-Z0-9]/g, ''))
+              if (error) setError('')
+            }}
+          />
+          <button type="submit" className="secondary-btn" disabled={busy}>Vào phòng</button>
+        </form>
+
+        {error && <p className="error" role="alert" aria-live="assertive">{error}</p>}
+      </section>
+
+      <section className="home-section" aria-label="Danh sách phòng">
+        <div className="section-head">
+          <h2>Phòng đang chờ</h2>
+          <span className="section-count">{openRooms.length}</span>
+        </div>
+        <ul className="room-list">
+          {openRooms.map((r) => {
+            const maxP = r.max_players ?? 9
+            const full = (r.player_count ?? 0) >= maxP
+            return (
+              <li key={r.code}>
+                <span className="code">{r.code}</span>
+                <span className="count">
+                  <span className="status-dot open" aria-hidden="true" />
+                  {r.player_count ?? 0}/{maxP} người · Đang chờ
+                </span>
+                <button
+                  type="button"
+                  className="secondary-btn"
+                  disabled={busy || full}
+                  onClick={() => joinCode(r.code, true)}
+                >
+                  {full ? 'Đầy' : 'Tham gia'}
+                </button>
+              </li>
+            )
+          })}
+          {!loadingRooms && openRooms.length === 0 && (
+            <li className="empty">Chưa có phòng nào đang chờ — hãy tạo phòng mới để bắt đầu.</li>
+          )}
+          {loadingRooms && (
+            <li className="empty">Đang tải danh sách phòng…</li>
+          )}
+        </ul>
+
+        {playingRooms.length > 0 && (
+          <div className="home-subsection">
+            <div className="section-head">
+              <h3 className="sub-heading">Đang diễn ra</h3>
+              <span className="section-count muted">{playingRooms.length}</span>
+            </div>
+            <ul className="room-list room-list-playing">
+              {playingRooms.map((r) => (
+                <li key={r.code}>
+                  <span className="code">{r.code}</span>
+                  <span className="count">
+                    <span className={`status-dot ${r.phase === 'ended' ? 'ended' : 'live'}`} aria-hidden="true" />
+                    {r.player_count ?? 0}/{r.max_players ?? 9} người · {r.phase === 'ended' ? 'Đã kết thúc' : 'Đang chơi'}
+                  </span>
+                  <button
+                    type="button"
+                    disabled={busy}
+                    title="Kết nối lại nếu bạn đã ở trong phòng này"
+                    onClick={() => joinCode(r.code, true)}
+                  >
+                    Kết nối lại
+                  </button>
+                </li>
+              ))}
+            </ul>
+          </div>
+        )}
+      </section>
+
+      <CatCustomizerModal
+        open={catOpen}
+        avatar={avatar}
+        playerName={name.trim() || 'Mèo của bạn'}
+        onClose={() => setCatOpen(false)}
+        onSave={(next) => setAvatar(saveAvatar(next))}
+      />
+    </main>
   )
 }

@@ -1,0 +1,62 @@
+{
+  "name": "2-player-edition",
+  "title": "Exploding Kittens 2-Player Edition",
+  "deck_type": "Standalone",
+  "base_merged": false,
+  "card_count": 32,
+  "description": "Exploding Kittens: 2-Player Edition is a highly strategic, kitty-powered version of Russian Roulette made smaller, travel-friendly and compact to take on-the-go.",
+  "theme_color": "#861618",
+  "source_url": "https://explodi.ng/decks/exploding-kittens-2-player-edition",
+  "cards": {
+    "attack2x": {
+      "0": 1,
+      "1": 1
+    },
+    "cat": {
+      "0": 1,
+      "1": 1,
+      "2": 1,
+      "3": 1,
+      "4": 1,
+      "5": 1,
+      "6": 1,
+      "7": 1,
+      "9": 1,
+      "10": 1,
+      "11": 1,
+      "12": 1
+    },
+    "defuse": {
+      "0": 1,
+      "1": 1,
+      "2": 1
+    },
+    "explodingkitten": {
+      "0": 1
+    },
+    "favor": {
+      "0": 1,
+      "1": 1,
+      "2": 1
+    },
+    "nope": {
+      "0": 1,
+      "1": 1,
+      "2": 1
+    },
+    "seethefuture3x": {
+      "0": 1,
+      "1": 1,
+      "2": 1
+    },
+    "shuffle": {
+      "0": 1,
+      "1": 1
+    },
+    "skip": {
+      "0": 1,
+      "1": 1,
+      "2": 1
+    }
+  }
+}

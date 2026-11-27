@@ -1,0 +1,795 @@
+/* ══════════════════════════════════════════════════════════
+   CardTransferFx — Pure GPU Card Draw / Give / Receive Choreography
+   Animate ONLY transform (translate3d/rotate/scale) & opacity.
+   Zero backdrop-filter, zero mix-blend-mode, zero layout thrash.
+   ══════════════════════════════════════════════════════════ */
+
+.card-transfer-layer {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  overflow: hidden;
+  z-index: 32;
+  contain: layout paint style;
+  --ctf-hand-flip: 1;
+  /* draw-hand.png is 400x227 with wrist on left, pinch on right -> -90deg points fingers UP */
+  --ctf-hand-rot: -90deg;
+  --ctf-dur: 820ms;
+  --ctf-dx: -84px;
+  --ctf-dy: -22px;
+  --ctf-deck-w: 108px;
+  --ctf-deck-h: 148px;
+}
+
+.ctf-card-track,
+.ctf-hand-track,
+.ctf-favor-pop,
+.ctf-catch-ring,
+.ctf-deck-ring,
+.ctf-pill-wrap {
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  opacity: 0;
+  will-change: transform, opacity;
+}
+
+/* ─── Card Back Prop ─── */
+.ctf-card-track {
+  width: 78px;
+  height: 110px;
+  margin-left: -39px;
+  margin-top: -55px;
+  z-index: 4;
+}
+
+.ctf-card-frame {
+  width: 100%;
+  height: 100%;
+  border-radius: 10px;
+  overflow: hidden;
+  border: 1.5px solid rgba(255, 232, 166, 0.72);
+  box-shadow: 0 10px 22px rgba(0, 0, 0, 0.55);
+  background: #1a2822;
+}
+
+.ctf-card-img {
+  display: block;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  user-select: none;
+  -webkit-user-drag: none;
+}
+
+/* ─── Real Hand Prop ─── */
+.ctf-hand-track {
+  width: clamp(132px, 24%, 172px);
+  margin-left: -76px;
+  margin-top: -46px;
+  z-index: 5;
+}
+
+.ctf-hand-orient {
+  width: 100%;
+  transform: scaleX(var(--ctf-hand-flip)) rotate(var(--ctf-hand-rot));
+}
+
+.ctf-hand-img {
+  display: block;
+  width: 100%;
+  height: auto;
+  object-fit: contain;
+  user-select: none;
+  -webkit-user-drag: none;
+  -webkit-mask-image: linear-gradient(to right, transparent 0%, #000 18%, #000 100%);
+  mask-image: linear-gradient(to right, transparent 0%, #000 18%, #000 100%);
+}
+
+/* ─── Favor Businessman Pop ─── */
+.ctf-favor-pop {
+  width: clamp(120px, 22%, 158px);
+  margin-left: -70px;
+  margin-top: -128px;
+  z-index: 2;
+  animation: ctf-favor-peek var(--ctf-dur) cubic-bezier(0.22, 1, 0.36, 1) forwards;
+}
+
+.ctf-favor-img {
+  display: block;
+  width: 100%;
+  height: auto;
+  object-fit: contain;
+  user-select: none;
+  -webkit-user-drag: none;
+}
+
+/* ─── Rings ─── */
+.ctf-catch-ring,
+.ctf-deck-ring {
+  width: 120px;
+  height: 120px;
+  margin-left: -60px;
+  margin-top: -60px;
+  border-radius: 50%;
+  border: 2.5px solid rgba(246, 201, 94, 0.88);
+  z-index: 1;
+}
+
+.ctf-catch-ring {
+  animation: ctf-catch-pulse var(--ctf-dur) cubic-bezier(0.16, 1, 0.3, 1) forwards;
+}
+
+.ctf-deck-ring {
+  animation: ctf-deck-pulse var(--ctf-dur) cubic-bezier(0.16, 1, 0.3, 1) forwards;
+}
+
+.ctf-draw-ring {
+  border-color: rgba(66, 218, 139, 0.86);
+}
+
+/* ─── Label Pill ─── */
+.ctf-pill-wrap {
+  z-index: 6;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 4px;
+  transform: translate3d(-50%, -50%, 0);
+  animation: ctf-pill-pop var(--ctf-dur) cubic-bezier(0.22, 1, 0.36, 1) forwards;
+}
+
+/* ─── Pill color & Deck-anchored positioning ─── */
+.ctf-pill {
+  padding: 5px 14px;
+  border-radius: 999px;
+  background: rgba(35, 30, 26, 0.94);
+  border: 1.5px solid rgba(255, 238, 218, 0.28);
+  color: #faf3ea;
+  font-family: var(--font-display, 'Baloo 2', system-ui, sans-serif);
+  font-size: 13px;
+  font-weight: 800;
+  letter-spacing: 0.9px;
+  white-space: nowrap;
+  box-shadow: 0 6px 16px rgba(0, 0, 0, 0.5);
+}
+
+.card-transfer-layer.is-bottom .ctf-pill {
+  border-color: rgba(86, 230, 255, 0.72);
+  color: #d9f8ff;
+}
+
+.card-transfer-layer.mode-receive_in .ctf-pill {
+  border-color: rgba(242, 92, 59, 0.75);
+  color: #fff2e8;
+}
+
+.card-transfer-layer.mode-give_out .ctf-pill {
+  border-color: rgba(242, 92, 59, 0.72);
+}
+
+.ctf-sub-pill {
+  padding: 2px 10px;
+  border-radius: 999px;
+  background: rgba(25, 21, 18, 0.9);
+  border: 1px solid rgba(255, 238, 218, 0.16);
+  color: #baa999;
+  font-size: 11px;
+  font-weight: 800;
+  letter-spacing: 0.4px;
+  white-space: nowrap;
+}
+
+/* Anchored directly onto real Deck DOM position */
+.mode-draw_mine .ctf-hand-track,
+.mode-draw_mine .ctf-card-track,
+.mode-draw_mine .ctf-deck-ring,
+.mode-draw_other .ctf-hand-track,
+.mode-draw_other .ctf-card-track,
+.mode-draw_other .ctf-deck-ring,
+.mode-give_out.is-to-deck .ctf-hand-track,
+.mode-give_out.is-to-deck .ctf-card-track,
+.mode-give_out.is-to-deck .ctf-deck-ring {
+  left: calc(50% + var(--ctf-dx));
+  top: calc(50% + var(--ctf-dy));
+}
+
+.mode-draw_mine .ctf-card-track,
+.mode-draw_other .ctf-card-track,
+.mode-give_out.is-to-deck .ctf-card-track {
+  width: var(--ctf-deck-w);
+  height: var(--ctf-deck-h);
+  margin-left: calc(var(--ctf-deck-w) / -2);
+  margin-top: calc(var(--ctf-deck-h) / -2);
+}
+
+.mode-draw_mine .ctf-pill-wrap,
+.mode-draw_other .ctf-pill-wrap,
+.mode-give_out.is-to-deck .ctf-pill-wrap {
+  left: clamp(92px, calc(50% + var(--ctf-dx) + 96px), calc(100% - 92px));
+  top: calc(50% + var(--ctf-dy));
+}
+
+/* ══════════════════════════════════════════════════════════
+   MODE 1: draw_mine (Top & Bottom — anchored at Deck, card shrinks as drawn)
+   ══════════════════════════════════════════════════════════ */
+.mode-draw_mine.is-top .ctf-hand-track {
+  animation: ctf-hand-draw-mine var(--ctf-dur) cubic-bezier(0.22, 1, 0.36, 1) forwards;
+}
+.mode-draw_mine.is-top .ctf-card-track {
+  animation: ctf-card-draw-mine var(--ctf-dur) cubic-bezier(0.22, 1, 0.36, 1) forwards;
+}
+
+.mode-draw_mine.is-bottom .ctf-hand-track {
+  animation: ctf-hand-draw-bottom var(--ctf-dur) cubic-bezier(0.22, 1, 0.36, 1) forwards;
+}
+.mode-draw_mine.is-bottom .ctf-card-track {
+  animation: ctf-card-draw-bottom var(--ctf-dur) cubic-bezier(0.22, 1, 0.36, 1) forwards;
+}
+
+@keyframes ctf-hand-draw-mine {
+  0% {
+    opacity: 0;
+    transform: translate3d(58px, 224px, 0) rotate(10deg) scale(1.04);
+  }
+  26% {
+    opacity: 1;
+    transform: translate3d(6px, 118px, 0) rotate(-3deg) scale(0.98);
+  }
+  38% {
+    opacity: 1;
+    transform: translate3d(6px, 112px, 0) rotate(-5deg) scale(0.96);
+  }
+  78% {
+    opacity: 0.96;
+    transform: translate3d(74px, 206px, 0) rotate(4deg) scale(0.86);
+  }
+  100% {
+    opacity: 0;
+    transform: translate3d(88px, 246px, 0) rotate(8deg) scale(0.82);
+  }
+}
+
+@keyframes ctf-card-draw-mine {
+  0%, 24% {
+    opacity: 0;
+    transform: translate3d(0px, 0px, 0) rotate(0deg) scale(1);
+  }
+  36% {
+    opacity: 1;
+    transform: translate3d(0px, -4px, 0) rotate(-3deg) scale(1);
+  }
+  78% {
+    opacity: 1;
+    transform: translate3d(68px, 122px, 0) rotate(3deg) scale(0.72);
+  }
+  100% {
+    opacity: 0;
+    transform: translate3d(84px, 166px, 0) rotate(6deg) scale(0.58);
+  }
+}
+
+@keyframes ctf-hand-draw-bottom {
+  0% {
+    opacity: 0;
+    transform: translate3d(52px, 214px, 0) rotate(10deg) scale(1.04);
+  }
+  28% {
+    opacity: 1;
+    transform: translate3d(0px, 114px, 0) rotate(-8deg) scale(0.96);
+  }
+  38% {
+    opacity: 1;
+    transform: translate3d(2px, 116px, 0) rotate(-6deg) scale(0.95);
+  }
+  78% {
+    opacity: 0.96;
+    transform: translate3d(68px, 200px, 0) rotate(3deg) scale(0.86);
+  }
+  100% {
+    opacity: 0;
+    transform: translate3d(84px, 244px, 0) rotate(8deg) scale(0.82);
+  }
+}
+
+@keyframes ctf-card-draw-bottom {
+  0%, 22% {
+    opacity: 0;
+    transform: translate3d(-4px, 12px, 0) rotate(-6deg) scale(0.94);
+  }
+  36% {
+    opacity: 1;
+    transform: translate3d(-4px, 24px, 0) rotate(-5deg) scale(0.98);
+  }
+  78% {
+    opacity: 1;
+    transform: translate3d(66px, 124px, 0) rotate(2deg) scale(0.72);
+  }
+  100% {
+    opacity: 0;
+    transform: translate3d(82px, 166px, 0) rotate(5deg) scale(0.58);
+  }
+}
+
+/* ══════════════════════════════════════════════════════════
+   MODE 2: draw_other (Opponent pulls card off Deck upward & shrinks)
+   ══════════════════════════════════════════════════════════ */
+.mode-draw_other .ctf-hand-track {
+  animation: ctf-hand-draw-other var(--ctf-dur) cubic-bezier(0.22, 1, 0.36, 1) forwards;
+}
+.mode-draw_other .ctf-card-track {
+  animation: ctf-card-draw-other var(--ctf-dur) cubic-bezier(0.22, 1, 0.36, 1) forwards;
+}
+
+@keyframes ctf-hand-draw-other {
+  0% {
+    opacity: 0;
+    transform: translate3d(26px, -214px, 0) rotate(188deg) scale(1.02);
+  }
+  28% {
+    opacity: 1;
+    transform: translate3d(-2px, -98px, 0) rotate(176deg) scale(0.96);
+  }
+  38% {
+    opacity: 1;
+    transform: translate3d(0px, -100px, 0) rotate(174deg) scale(0.95);
+  }
+  78% {
+    opacity: 0.94;
+    transform: translate3d(44px, -184px, 0) rotate(184deg) scale(0.85);
+  }
+  100% {
+    opacity: 0;
+    transform: translate3d(54px, -226px, 0) rotate(188deg) scale(0.8);
+  }
+}
+
+@keyframes ctf-card-draw-other {
+  0%, 24% {
+    opacity: 0;
+    transform: translate3d(0px, 0px, 0) rotate(0deg) scale(1);
+  }
+  36% {
+    opacity: 1;
+    transform: translate3d(0px, -6px, 0) rotate(-3deg) scale(1);
+  }
+  78% {
+    opacity: 1;
+    transform: translate3d(44px, -110px, 0) rotate(6deg) scale(0.7);
+  }
+  100% {
+    opacity: 0;
+    transform: translate3d(54px, -150px, 0) rotate(10deg) scale(0.56);
+  }
+}
+
+/* ══════════════════════════════════════════════════════════
+   MODE 3: give_out (Hand pushes card UP, or arcs to Deck)
+   ══════════════════════════════════════════════════════════ */
+.mode-give_out:not(.is-to-deck) .ctf-hand-track {
+  animation: ctf-hand-give-out var(--ctf-dur) cubic-bezier(0.22, 1, 0.36, 1) forwards;
+}
+.mode-give_out:not(.is-to-deck) .ctf-card-track {
+  animation: ctf-card-give-out var(--ctf-dur) cubic-bezier(0.22, 1, 0.36, 1) forwards;
+}
+
+.mode-give_out.is-to-deck .ctf-hand-track {
+  animation: ctf-hand-put-deck var(--ctf-dur) cubic-bezier(0.22, 1, 0.36, 1) forwards;
+}
+.mode-give_out.is-to-deck .ctf-card-track {
+  animation: ctf-card-put-deck var(--ctf-dur) cubic-bezier(0.22, 1, 0.36, 1) forwards;
+}
+
+.mode-give_out.is-favor {
+  --ctf-dur: 960ms;
+}
+
+.mode-give_out.is-favor:not(.is-to-deck) .ctf-card-track {
+  animation: ctf-card-favor-give var(--ctf-dur) cubic-bezier(0.22, 1, 0.36, 1) forwards;
+}
+
+.mode-give_out.is-favor:not(.is-to-deck) .ctf-hand-track {
+  animation: ctf-hand-favor-give var(--ctf-dur) cubic-bezier(0.22, 1, 0.36, 1) forwards;
+}
+
+@keyframes ctf-card-favor-give {
+  0% {
+    opacity: 0;
+    transform: translate3d(0px, 134px, 0) rotate(5deg) scale(0.92);
+  }
+  18% {
+    opacity: 1;
+    transform: translate3d(-4px, 70px, 0) rotate(1deg) scale(1.02);
+  }
+  44% {
+    opacity: 1;
+    transform: translate3d(-14px, -14px, 0) rotate(-4deg) scale(0.92);
+  }
+  78% {
+    opacity: 1;
+    transform: translate3d(-14px, -14px, 0) rotate(-4deg) scale(0.92);
+  }
+  100% {
+    opacity: 0;
+    transform: translate3d(-14px, -22px, 0) rotate(-4deg) scale(0.86);
+  }
+}
+
+@keyframes ctf-hand-favor-give {
+  0% {
+    opacity: 0;
+    transform: translate3d(14px, 226px, 0) rotate(8deg) scale(1.04);
+  }
+  22% {
+    opacity: 1;
+    transform: translate3d(0px, 152px, 0) rotate(2deg) scale(0.98);
+  }
+  46% {
+    opacity: 1;
+    transform: translate3d(-8px, 78px, 0) rotate(-4deg) scale(0.94);
+  }
+  78% {
+    opacity: 0.85;
+    transform: translate3d(16px, 154px, 0) rotate(6deg) scale(1.02);
+  }
+  100% {
+    opacity: 0;
+    transform: translate3d(32px, 226px, 0) rotate(10deg) scale(1.06);
+  }
+}
+
+@keyframes ctf-hand-give-out {
+  0% {
+    opacity: 0;
+    transform: translate3d(10px, 226px, 0) rotate(8deg) scale(1.06);
+  }
+  20% {
+    opacity: 1;
+    transform: translate3d(8px, 168px, 0) rotate(2deg) scale(1.02);
+  }
+  52% {
+    opacity: 1;
+    transform: translate3d(4px, 68px, 0) rotate(-4deg) scale(0.96);
+  }
+  84% {
+    opacity: 0.85;
+    transform: translate3d(22px, 158px, 0) rotate(6deg) scale(1.04);
+  }
+  100% {
+    opacity: 0;
+    transform: translate3d(38px, 226px, 0) rotate(12deg) scale(1.08);
+  }
+}
+
+@keyframes ctf-card-give-out {
+  0% {
+    opacity: 0;
+    transform: translate3d(0px, 134px, 0) rotate(5deg) scale(0.92);
+  }
+  18% {
+    opacity: 1;
+    transform: translate3d(0px, 78px, 0) rotate(2deg) scale(1.04);
+  }
+  52% {
+    opacity: 1;
+    transform: translate3d(0px, -24px, 0) rotate(-4deg) scale(0.98);
+  }
+  84% {
+    opacity: 0.92;
+    transform: translate3d(0px, -118px, 0) rotate(-8deg) scale(0.88);
+  }
+  100% {
+    opacity: 0;
+    transform: translate3d(0px, -162px, 0) rotate(-10deg) scale(0.76);
+  }
+}
+
+@keyframes ctf-hand-put-deck {
+  0% {
+    opacity: 0;
+    transform: translate3d(98px, 214px, 0) rotate(10deg) scale(0.9);
+  }
+  22% {
+    opacity: 1;
+    transform: translate3d(68px, 162px, 0) rotate(2deg) scale(0.94);
+  }
+  60% {
+    opacity: 1;
+    transform: translate3d(4px, 94px, 0) rotate(-6deg) scale(0.96);
+  }
+  86% {
+    opacity: 0.84;
+    transform: translate3d(70px, 174px, 0) rotate(6deg) scale(1);
+  }
+  100% {
+    opacity: 0;
+    transform: translate3d(96px, 224px, 0) rotate(12deg) scale(1.04);
+  }
+}
+
+@keyframes ctf-card-put-deck {
+  0% {
+    opacity: 0;
+    transform: translate3d(92px, 146px, 0) rotate(8deg) scale(0.68);
+  }
+  20% {
+    opacity: 1;
+    transform: translate3d(62px, 84px, 0) rotate(0deg) scale(0.84);
+  }
+  62% {
+    opacity: 1;
+    transform: translate3d(0px, -2px, 0) rotate(-4deg) scale(1);
+  }
+  86% {
+    opacity: 0.9;
+    transform: translate3d(0px, 0px, 0) rotate(0deg) scale(0.98);
+  }
+  100% {
+    opacity: 0;
+    transform: translate3d(0px, 0px, 0) rotate(0deg) scale(0.92);
+  }
+}
+
+/* ══════════════════════════════════════════════════════════
+   MODE 4: receive_in (Slides IN from upper table to hand + gold catch ring)
+   ══════════════════════════════════════════════════════════ */
+.mode-receive_in .ctf-hand-track {
+  animation: ctf-hand-receive-in var(--ctf-dur) cubic-bezier(0.22, 1, 0.36, 1) forwards;
+}
+.mode-receive_in .ctf-card-track {
+  animation: ctf-card-receive-in var(--ctf-dur) cubic-bezier(0.22, 1, 0.36, 1) forwards;
+}
+
+@keyframes ctf-hand-receive-in {
+  0% {
+    opacity: 0;
+    transform: translate3d(4px, -240px, 0) rotate(186deg) scale(1.04);
+  }
+  22% {
+    opacity: 1;
+    transform: translate3d(2px, -152px, 0) rotate(178deg) scale(0.96);
+  }
+  58% {
+    opacity: 1;
+    transform: translate3d(0px, -16px, 0) rotate(176deg) scale(0.98);
+  }
+  86% {
+    opacity: 0.82;
+    transform: translate3d(12px, -138px, 0) rotate(184deg) scale(1.02);
+  }
+  100% {
+    opacity: 0;
+    transform: translate3d(22px, -228px, 0) rotate(188deg) scale(1.05);
+  }
+}
+
+@keyframes ctf-card-receive-in {
+  0% {
+    opacity: 0;
+    transform: translate3d(0px, -152px, 0) rotate(-10deg) scale(0.8);
+  }
+  20% {
+    opacity: 1;
+    transform: translate3d(0px, -68px, 0) rotate(-4deg) scale(0.98);
+  }
+  62% {
+    opacity: 1;
+    transform: translate3d(0px, 76px, 0) rotate(2deg) scale(1.08);
+  }
+  86% {
+    opacity: 0.92;
+    transform: translate3d(0px, 126px, 0) rotate(4deg) scale(0.98);
+  }
+  100% {
+    opacity: 0;
+    transform: translate3d(0px, 162px, 0) rotate(6deg) scale(0.86);
+  }
+}
+
+/* ══════════════════════════════════════════════════════════
+   MODE 5: transfer_other (Horizontal arc across upper midfield)
+   ══════════════════════════════════════════════════════════ */
+.mode-transfer_other .ctf-hand-track {
+  animation: ctf-hand-transfer-other var(--ctf-dur) cubic-bezier(0.22, 1, 0.36, 1) forwards;
+}
+.mode-transfer_other .ctf-card-track {
+  animation: ctf-card-transfer-other var(--ctf-dur) cubic-bezier(0.22, 1, 0.36, 1) forwards;
+}
+
+@keyframes ctf-hand-transfer-other {
+  0% {
+    opacity: 0;
+    transform: translate3d(-146px, -130px, 0) rotate(168deg) scale(0.92);
+  }
+  24% {
+    opacity: 1;
+    transform: translate3d(-70px, -154px, 0) rotate(174deg) scale(0.94);
+  }
+  56% {
+    opacity: 1;
+    transform: translate3d(6px, -168px, 0) rotate(182deg) scale(0.94);
+  }
+  86% {
+    opacity: 0.85;
+    transform: translate3d(102px, -144px, 0) rotate(190deg) scale(0.92);
+  }
+  100% {
+    opacity: 0;
+    transform: translate3d(148px, -128px, 0) rotate(194deg) scale(0.9);
+  }
+}
+
+@keyframes ctf-card-transfer-other {
+  0% {
+    opacity: 0;
+    transform: translate3d(-138px, -48px, 0) rotate(-14deg) scale(0.76);
+  }
+  20% {
+    opacity: 1;
+    transform: translate3d(-72px, -74px, 0) rotate(-6deg) scale(0.96);
+  }
+  52% {
+    opacity: 1;
+    transform: translate3d(0px, -88px, 0) rotate(2deg) scale(1.04);
+  }
+  84% {
+    opacity: 0.94;
+    transform: translate3d(96px, -64px, 0) rotate(10deg) scale(0.92);
+  }
+  100% {
+    opacity: 0;
+    transform: translate3d(146px, -46px, 0) rotate(16deg) scale(0.76);
+  }
+}
+
+/* ─── Ring, Favor & Pill Animations ─── */
+@keyframes ctf-catch-pulse {
+  0%, 38% {
+    opacity: 0;
+    transform: translate3d(0, 82px, 0) scale(0.35);
+  }
+  56% {
+    opacity: 0.95;
+    transform: translate3d(0, 82px, 0) scale(0.92);
+  }
+  85%, 100% {
+    opacity: 0;
+    transform: translate3d(0, 82px, 0) scale(1.55);
+  }
+}
+
+@keyframes ctf-deck-pulse {
+  0%, 20% {
+    opacity: 0;
+    transform: translate3d(0px, 0px, 0) scale(0.45);
+  }
+  42% {
+    opacity: 0.92;
+    transform: translate3d(0px, 0px, 0) scale(1.06);
+  }
+  84%, 100% {
+    opacity: 0;
+    transform: translate3d(0px, 0px, 0) scale(1.58);
+  }
+}
+
+@keyframes ctf-favor-peek {
+  0% {
+    opacity: 0;
+    transform: translate3d(0, 26px, 0) scale(0.72);
+  }
+  22% {
+    opacity: 1;
+    transform: translate3d(0, -14px, 0) scale(1.04);
+  }
+  78% {
+    opacity: 1;
+    transform: translate3d(0, -14px, 0) scale(1);
+  }
+  100% {
+    opacity: 0;
+    transform: translate3d(0, -28px, 0) scale(0.9);
+  }
+}
+
+@keyframes ctf-pill-pop {
+  0% {
+    opacity: 0;
+    transform: translate3d(-50%, calc(-50% + 76px), 0) scale(0.84);
+  }
+  18% {
+    opacity: 1;
+    transform: translate3d(-50%, calc(-50% + 56px), 0) scale(1.03);
+  }
+  76% {
+    opacity: 1;
+    transform: translate3d(-50%, calc(-50% + 52px), 0) scale(1);
+  }
+  100% {
+    opacity: 0;
+    transform: translate3d(-50%, calc(-50% + 40px), 0) scale(0.94);
+  }
+}
+
+.mode-give_out.is-favor .ctf-pill-wrap {
+  animation-name: ctf-pill-pop-low;
+}
+
+@keyframes ctf-pill-pop-low {
+  0% {
+    opacity: 0;
+    transform: translate3d(-50%, calc(-50% + 132px), 0) scale(0.84);
+  }
+  18% {
+    opacity: 1;
+    transform: translate3d(-50%, calc(-50% + 116px), 0) scale(1.03);
+  }
+  78% {
+    opacity: 1;
+    transform: translate3d(-50%, calc(-50% + 116px), 0) scale(1);
+  }
+  100% {
+    opacity: 0;
+    transform: translate3d(-50%, calc(-50% + 106px), 0) scale(0.94);
+  }
+}
+
+.mode-draw_other .ctf-pill-wrap,
+.mode-transfer_other .ctf-pill-wrap {
+  animation-name: ctf-pill-pop-top;
+}
+
+@keyframes ctf-pill-pop-top {
+  0% {
+    opacity: 0;
+    transform: translate3d(-50%, calc(-50% - 26px), 0) scale(0.84);
+  }
+  18% {
+    opacity: 1;
+    transform: translate3d(-50%, calc(-50% - 42px), 0) scale(1.03);
+  }
+  76% {
+    opacity: 1;
+    transform: translate3d(-50%, calc(-50% - 46px), 0) scale(1);
+  }
+  100% {
+    opacity: 0;
+    transform: translate3d(-50%, calc(-50% - 56px), 0) scale(0.94);
+  }
+}
+
+@media (max-width: 900px) {
+  .card-transfer-layer {
+    --ctf-deck-w: 76px;
+    --ctf-deck-h: 107px;
+  }
+  .ctf-card-track {
+    width: 60px;
+    height: 86px;
+    margin-left: -30px;
+    margin-top: -43px;
+  }
+  .mode-draw_mine .ctf-card-track,
+  .mode-draw_other .ctf-card-track,
+  .mode-give_out.is-to-deck .ctf-card-track {
+    width: var(--ctf-deck-w);
+    height: var(--ctf-deck-h);
+    margin-left: calc(var(--ctf-deck-w) / -2);
+    margin-top: calc(var(--ctf-deck-h) / -2);
+  }
+  .ctf-hand-track {
+    width: clamp(96px, 28%, 126px);
+    margin-left: -52px;
+    margin-top: -36px;
+  }
+  .ctf-pill {
+    font-size: 11.5px;
+    padding: 4px 11px;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .card-transfer-layer {
+    display: none !important;
+  }
+}

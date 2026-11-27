@@ -1,0 +1,105 @@
+{
+  "name": "zombie-kittens",
+  "title": "Exploding Kittens: Zombie Kittens",
+  "deck_type": "Standalone",
+  "base_merged": false,
+  "card_count": 61,
+  "description": "Zombie Kittens is still the highly-strategic, kitty powered version of Russian Roulette that you love, but it introduces a brand new deck of cards so that your game doesn’t end...",
+  "theme_color": "#bad434",
+  "source_url": "https://explodi.ng/decks/exploding-kittens-zombie-kittens",
+  "cards": {
+    "attack2x": {
+      "0": 1,
+      "1": 1
+    },
+    "attackofthedead": {
+      "0": 1,
+      "1": 1,
+      "2": 1
+    },
+    "cat": {
+      "0": 1,
+      "1": 1,
+      "2": 1,
+      "3": 1,
+      "4": 1,
+      "5": 1,
+      "6": 1,
+      "7": 1,
+      "9": 1,
+      "10": 1,
+      "11": 1,
+      "12": 1,
+      "13": 1,
+      "14": 1,
+      "15": 1,
+      "16": 1
+    },
+    "clairvoyance": {
+      "0": 1,
+      "1": 1
+    },
+    "clone": {
+      "0": 1,
+      "1": 1,
+      "2": 1
+    },
+    "digdeeper": {
+      "0": 1,
+      "1": 1,
+      "2": 1,
+      "3": 1
+    },
+    "explodingkitten": {
+      "0": 1,
+      "1": 1,
+      "2": 1,
+      "3": 1
+    },
+    "favor": {
+      "0": 1,
+      "1": 1,
+      "2": 1
+    },
+    "feedthedead": {
+      "0": 1,
+      "1": 1
+    },
+    "graverobber": {
+      "0": 1
+    },
+    "nope": {
+      "0": 1,
+      "1": 1,
+      "2": 1,
+      "3": 1,
+      "4": 1
+    },
+    "seethefuture3x": {
+      "0": 1,
+      "1": 1,
+      "2": 1,
+      "3": 1
+    },
+    "shufflenow": {
+      "0": 1,
+      "1": 1
+    },
+    "skip": {
+      "0": 1,
+      "1": 1,
+      "2": 1
+    },
+    "superskip": {
+      "0": 1,
+      "1": 1
+    },
+    "zombiekitten": {
+      "0": 1,
+      "1": 1,
+      "2": 1,
+      "3": 1,
+      "4": 1
+    }
+  }
+}

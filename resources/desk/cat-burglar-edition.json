@@ -1,0 +1,85 @@
+{
+  "name": "cat-burglar-edition",
+  "title": "Exploding Kittens: Cat Burglar Edition",
+  "deck_type": "Standalone",
+  "base_merged": false,
+  "card_count": 56,
+  "description": "Exploding Kittens is a highly-strategic, kitty powered version of Russian Roulette. Players draw cards until somebody draws an Exploding Kitten, at which point they explode and...",
+  "theme_color": "#861618",
+  "source_url": "https://explodi.ng/decks/exploding-kittens-cat-burglar-edition",
+  "cards": {
+    "attack2x": {
+      "0": 1,
+      "1": 1,
+      "2": 1,
+      "3": 1
+    },
+    "cat": {
+      "0": 1,
+      "1": 1,
+      "2": 1,
+      "3": 1,
+      "4": 1,
+      "5": 1,
+      "6": 1,
+      "7": 1,
+      "9": 1,
+      "10": 1,
+      "11": 1,
+      "12": 1,
+      "13": 1,
+      "14": 1,
+      "15": 1,
+      "16": 1,
+      "17": 1,
+      "18": 1,
+      "19": 1,
+      "20": 1
+    },
+    "defuse": {
+      "0": 1,
+      "1": 1,
+      "2": 1,
+      "3": 1,
+      "4": 1,
+      "5": 1
+    },
+    "explodingkitten": {
+      "0": 1,
+      "1": 1,
+      "2": 1,
+      "3": 1
+    },
+    "favor": {
+      "0": 1,
+      "1": 1,
+      "2": 1,
+      "3": 1
+    },
+    "nope": {
+      "0": 1,
+      "1": 1,
+      "2": 1,
+      "3": 1,
+      "4": 1
+    },
+    "seethefuture3x": {
+      "0": 2,
+      "1": 1,
+      "2": 1,
+      "3": 1
+    },
+    "shuffle": {
+      "0": 1,
+      "1": 1,
+      "2": 1,
+      "3": 1
+    },
+    "skip": {
+      "0": 1,
+      "1": 1,
+      "2": 1,
+      "3": 1
+    }
+  }
+}

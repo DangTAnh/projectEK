@@ -25,6 +25,24 @@ def test_rest_rooms_and_cards():
     assert "feralcat" in cards and cards["skip"]["nopeable"] is True
 
 
+def test_rest_desks_and_desk_details():
+    desks = client.get("/api/desks").json()
+    assert isinstance(desks, list)
+    assert desks[:2] == ["original", "web"]
+    for expected in ("good-vs-evil", "zombie-kittens", "recipes-for-disaster"):
+        assert expected in desks
+
+    details = client.get("/api/desks/details").json()
+    assert isinstance(details, list)
+    assert [d["id"] for d in details] == desks
+    by_id = {d["id"]: d for d in details}
+    for desk_id in ("original", "web", "good-vs-evil", "zombie-kittens", "recipes-for-disaster"):
+        meta = by_id[desk_id]
+        assert isinstance(meta["title"], str) and meta["title"]
+        assert isinstance(meta["card_count"], int) and meta["card_count"] > 0
+        assert isinstance(meta["deck_type"], str) and meta["deck_type"]
+
+
 def test_ws_lobby_and_start():
     from server.rooms import MANAGER
 

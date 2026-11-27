@@ -9,9 +9,53 @@ from .cards import Card
 DESK_DIR = Path(__file__).resolve().parents[2] / "resources" / "desk"
 
 
+_PINNED_DESKS = ("original", "web")
+
+
 def available_desks() -> list[str]:
-    """Tên các bộ bài có sẵn (resources/desk/*.json)."""
-    return sorted(p.stem for p in DESK_DIR.glob("*.json"))
+    """Tên các bộ bài có sẵn (resources/desk/*.json), ưu tiên original/web trước."""
+    stems = {p.stem for p in DESK_DIR.glob("*.json")}
+    pinned = [d for d in _PINNED_DESKS if d in stems]
+    others = sorted(stems - set(pinned))
+    return pinned + others
+
+
+def desk_catalog() -> list[dict]:
+    """Metadata chi tiết cho từng bộ bài trong available_desks()."""
+    catalog: list[dict] = []
+    for stem in available_desks():
+        data = json.loads((DESK_DIR / f"{stem}.json").read_text(encoding="utf-8"))
+        cards = data.get("cards", {})
+        computed_count = sum(sum(int(cnt) for cnt in v.values()) for v in cards.values())
+        default_desc = (
+            "Bộ bài cổ điển 56 lá nguyên bản."
+            if stem == "original"
+            else "Bộ bài tổng hợp toàn bộ lá bài mở rộng trên web."
+            if stem == "web"
+            else ""
+        )
+        catalog.append(
+            {
+                "id": stem,
+                "title": data.get("title")
+                or (
+                    "Original Classic"
+                    if stem == "original"
+                    else "Web Full Expansion"
+                    if stem == "web"
+                    else stem
+                ),
+                "deck_type": data.get("deck_type") or "Standalone",
+                "base_merged": bool(data.get("base_merged", False)),
+                "card_count": int(data.get("card_count") or computed_count),
+                "expansion_card_count": data.get("expansion_card_count"),
+                "description": data.get("description") or default_desc,
+                "theme_color": data.get("theme_color")
+                or ("#e65c2c" if stem == "original" else "#22c55e"),
+                "source_url": data.get("source_url"),
+            }
+        )
+    return catalog
 
 
 class Deck:

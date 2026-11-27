@@ -5,6 +5,7 @@ Pending/decision points dùng continuation: _ask(kind, owner, data, cont) đặt
 Room đẩy respond() -> cont(payload) -> có thể _ask tiếp (chuỗi quyết định nối tiếp).
 """
 
+import copy
 import random
 
 from .cards import CARD_META, GODCAT_BANNED, RESCUE_ORDER, Card
@@ -12,6 +13,12 @@ from .deck import Deck
 from .player import Player
 
 BOMBS = {"explodingkitten", "implodingkitten"}
+TURN_ENDING_TYPES = {
+    "skip", "superskip", "reverse", "attack2x", "targetattack2x",
+    "attackofthedead", "drawfromthebottom", "digdeeper", "raisingheck",
+    "bury", "catomicbomb", "armageddon",
+}
+LOG_BUFFER_MAX = 300
 
 
 class GameError(Exception):
@@ -45,8 +52,36 @@ class Game:
         self.private_log: dict[str, list[str]] = {}  # name -> dòng log chỉ người đó thấy
         self.log_entries: list[tuple[int, str, str | None]] = []  # (seq, text, viewer)
         self.log_seq = 0
+        self._card_seq = 0
+        self._boom_seq = 0
+        self.last_boom: dict | None = None
+        self._fx_seq = 0
+        self._fx_events: list[dict] = []
 
     # ---------- helpers ----------
+
+    def _emit_fx(
+        self,
+        kind: str,
+        actor: str,
+        target: str | None = None,
+        card_type: str | None = None,
+        source: str | None = None,
+        count: int | None = None,
+    ) -> None:
+        self._fx_seq += 1
+        ev: dict = {"seq": self._fx_seq, "kind": kind, "actor": actor}
+        if target is not None:
+            ev["target"] = target
+        if card_type is not None:
+            ev["card_type"] = card_type
+        if source is not None:
+            ev["source"] = source
+        if count is not None:
+            ev["count"] = count
+        self._fx_events.append(ev)
+        if len(self._fx_events) > 20:
+            del self._fx_events[:-20]
 
     def _say(self, msg: str, private: str | None = None) -> None:
         self.log_seq += 1
@@ -55,8 +90,13 @@ class Game:
             del self.log_entries[:-1000]
         if private is None:
             self.log.append(msg)
+            if len(self.log) > LOG_BUFFER_MAX:
+                del self.log[:-LOG_BUFFER_MAX]
         else:
-            self.private_log.setdefault(private, []).append(msg)
+            plog = self.private_log.setdefault(private, [])
+            plog.append(msg)
+            if len(plog) > LOG_BUFFER_MAX:
+                del plog[:-LOG_BUFFER_MAX]
 
     def announce_desk(self, desk: str) -> None:
         self._say(f"🃏 Bộ bài: {desk}")
@@ -64,6 +104,12 @@ class Game:
     def log_for(self, name: str) -> list[str]:
         """Nhật ký theo thời gian của một người xem: công khai + riêng tư của họ."""
         visible = [text for _, text, viewer in self.log_entries
+                   if viewer is None or viewer == name]
+        return visible[-30:]
+
+    def log_entries_for(self, name: str) -> list[dict]:
+        """Nhật ký theo thời gian kèm seq tăng dần của một người xem."""
+        visible = [{"seq": seq, "text": text} for seq, text, viewer in self.log_entries
                    if viewer is None or viewer == name]
         return visible[-30:]
 
@@ -157,6 +203,7 @@ class Game:
                       "Vị trí không hợp lệ")
         card = target.hand[position]
         self._leave_hand(target, card)
+        self._emit_fx("transfer", actor=target.name, target=thief.name, card_type="steal")
         self._receive_card(thief, card)
         self._say(f"{thief.name} trộm 1 thẻ từ tay {target.name}!")
 
@@ -167,21 +214,35 @@ class Game:
         else:
             p.hand.append(card)
 
+    def _has_defuse(self, p: Player) -> bool:
+        return p.standby_defuse or p.has_type("defuse")
+
+    def _consume_defuse(self, p: Player) -> str | None:
+        if p.standby_defuse:
+            p.standby_defuse = False
+            return "Defuse dự phòng (Godcat)"
+        dfuse = next((c for c in p.hand if c.type == "defuse"), None)
+        if dfuse is not None:
+            self._leave_hand(p, dfuse)
+            self._to_grave(dfuse)
+            return "Defuse"
+        return None
+
     def _receive_bomb(self, p: Player, bomb: Card, start: int = 0) -> None:
         label = CARD_META[bomb.type]["name"]
         for i in range(start, len(RESCUE_ORDER)):
             t = RESCUE_ORDER[i]
-            if not p.has_type(t):
+            has_rescue = self._has_defuse(p) if t == "defuse" else p.has_type(t)
+            if not has_rescue:
                 continue
             if t == "defuse":
-                dfuse = next(c for c in p.hand if c.type == "defuse")
-                self._leave_hand(p, dfuse)
-                self._to_grave(dfuse)
-                self._say(f"{p.name} dùng Defuse cho {label} nhận được!")
+                used = self._consume_defuse(p)
+                self._emit_fx("defuse", actor=p.name, card_type="defuse")
+                self._say(f"{p.name} dùng {used} cho {label} nhận được!")
                 self._ask(
                     "pick_index", p.name,
                     {"reason": "defuse_receive", "min": 0, "max": self.deck.size(), "card": bomb.to_dict()},
-                    lambda r, b=bomb: self._finish_receive_insert(b, r),
+                    lambda r, pl=p, b=bomb: self._finish_receive_insert(pl, b, r),
                 )
                 return
             if t == "streakingkitten":
@@ -219,6 +280,7 @@ class Game:
     def _streaking_keep_received(self, p: Player, bomb: Card) -> None:
         # streaking.txt: giữ bom MIỄN LÀ streaking còn trên tay — KHÔNG bỏ streaking
         p.hand.append(bomb)
+        self._emit_fx("defuse", actor=p.name, card_type="streakingkitten")
         self._say(f"{p.name} GIỮ {CARD_META[bomb.type]['name']} nhận được nhờ Streaking Kitten!")
 
     def _zombie_use_received(self, p: Player, bomb: Card) -> None:
@@ -227,38 +289,58 @@ class Game:
     def _godcat_defuse_received(self, p: Player, bomb: Card) -> None:
         self._godcat_defuse(p, bomb, 0, False)
 
-    def _finish_receive_insert(self, bomb: Card, resp: dict) -> None:
+    def _finish_receive_insert(self, p: Player, bomb: Card, resp: dict) -> None:
         index = max(0, min(int(resp.get("index", 0)), self.deck.size()))
         self.deck.insert(bomb, index)
+        self._emit_fx("put_deck", actor=p.name, card_type=bomb.type)
         self._say(f"{CARD_META[bomb.type]['name']} chèn vào vị trí {index} từ đỉnh.")
 
     def _defuse_or_die(self, target: Player) -> None:
-        dfuse = next((c for c in target.hand if c.type == "defuse"), None)
-        if dfuse:
-            self._leave_hand(target, dfuse)
-            self._to_grave(dfuse)
-            self._say(f"{target.name} phải dùng Defuse cho Barking Kitten!")
+        used = self._consume_defuse(target)
+        if used:
+            self._emit_fx("defuse", actor=target.name, card_type="defuse")
+            self._say(f"{target.name} phải dùng {used} cho Barking Kitten!")
         else:
             self._say(f"💥 {target.name} không có Defuse trước Barking Kitten!")
             self._kill(target)
 
-    def _kill(self, p: Player, bomb: Card | None = None) -> None:
+    def _kill(self, p: Player, bomb: Card | None = None, cause: str | None = None) -> None:
         p.alive = False
         if bomb is not None:
             self._to_grave(bomb)
-        self._say(f"💥 BOOM! {p.name} nổ tung và bị loại!")
+        if cause == "imploding" or (bomb is not None and bomb.type == "implodingkitten"):
+            variant = "imploding"
+            self._say(f"🌌 BOOM! {p.name} nổ tung bởi Imploding Kitten và bị loại!")
+        elif cause == "devilcat" or (bomb is not None and bomb.type == "devilcat"):
+            variant = "devilcat"
+            self._say(f"😈 BOOM! {p.name} nổ tung bởi Devilcat và bị loại!")
+        else:
+            variant = "exploding"
+            self._say(f"💥 BOOM! {p.name} nổ tung và bị loại!")
+        self._boom_seq += 1
+        self.last_boom = {"seq": self._boom_seq, "who": p.name, "variant": variant}
         self._check_win()
 
     # ---------- lifecycle ----------
 
     def start(self) -> None:
-        """Chia bài: pool thường xáo -> mỗi người 4; +1 Defuse/người; thừa về đáy; N-1 bom
-        (N bom nếu deck có Streaking Kitten — cho phép 1 người ôm EK)."""
+        """Chia bài: pool thường xáo -> mỗi người 4; +1 lá cứu/người; thừa về đáy; N-1 bom
+        (N bom nếu deck có Streaking Kitten — cho phép 1 người ôm EK), giữ nguyên Imploding Kitten."""
         self.deck.load_pool(self.desk_name)
+        imploding_kittens = [c for c in self.deck.cards if c.type == "implodingkitten"]
+        for imp in imploding_kittens:
+            imp.faceup = False
         # original.json chứa sẵn 20 bom + 6 defuse: tách cả hai, bom do engine tự chia
         defuses = [c for c in self.deck.cards if c.type == "defuse"]
         has_streaking = any(c.type == "streakingkitten" for c in self.deck.cards)
         self.deck.cards = [c for c in self.deck.cards if c.type not in ("defuse", *BOMBS)]
+        if len(defuses) == 0 and any(c.type == "zombiekitten" for c in self.deck.cards):
+            rescue_type = "zombiekitten"
+            rescue_cards = [c for c in self.deck.cards if c.type == "zombiekitten"]
+            self.deck.cards = [c for c in self.deck.cards if c.type != "zombiekitten"]
+        else:
+            rescue_type = "defuse"
+            rescue_cards = defuses
         self.deck.shuffle()
 
         for name in self.order:  # mỗi người rút 4 từ pool thường
@@ -268,11 +350,13 @@ class Game:
                     self.players[name].hand.append(card)
 
         n = len(self.order)
-        for name in self.order:  # mỗi người 1 Defuse
-            if defuses:
-                self.players[name].hand.append(defuses.pop())
-        for d in defuses:  # Defuse thừa về đáy
-            self.deck.insert_bottom(d)
+        for name in self.order:  # mỗi người 1 lá cứu (Defuse hoặc Zombie Kitten)
+            if rescue_cards:
+                self.players[name].hand.append(rescue_cards.pop())
+            else:
+                self.players[name].hand.append(Card(id="", type=rescue_type, variant=0))
+        for r_card in rescue_cards:  # lá cứu thừa về đáy
+            self.deck.insert_bottom(r_card)
 
         # Streaking Kitten trong pool -> thêm 1 EK (tổng = số người chơi)
         n_bombs = n if has_streaking else n - 1
@@ -280,6 +364,8 @@ class Game:
         for _ in range(n_bombs):
             bomb = Card(id="", type="explodingkitten", variant=random.choice(ek_variants))
             self.deck.insert(bomb, random.randint(0, self.deck.size()))
+        for imp in imploding_kittens:
+            self.deck.insert(imp, random.randint(0, self.deck.size()))
 
         # Tower of Power stash: 6 lá thường dưới vương miện
         normals = [c for c in self.deck.cards if c.type not in BOMBS][:6]
@@ -302,6 +388,7 @@ class Game:
         for card in everywhere:
             seq += 1
             card.id = f"{card.type}.{card.variant}.{seq}"
+        self._card_seq = seq
 
     @staticmethod
     def _fuzzy_type(query: str) -> str | None:
@@ -339,12 +426,108 @@ class Game:
         p = self._get(name)
         resolved = self._fuzzy_type(ctype)
         self._require(resolved is not None, f"Không tìm thấy thẻ '{ctype}' — gõ lại gần tên hơn")
-        # id duy nhất: đếm mọi lá hiện có + 1
-        everywhere = len(self.deck.cards) + len(self.stash) + sum(
-            len(q.hand) for q in self.players.values())
-        card = Card(id=f"{resolved}.{variant}.{everywhere + 1}", type=resolved, variant=variant)
+        self._card_seq += 1
+        card = Card(id=f"{resolved}.{variant}.{self._card_seq}", type=resolved, variant=variant)
         self._receive_card(p, card)
         self._say(f"[debug] {name} nhận {resolved}")
+
+    def debug_put_deck(self, ctype: str, index: int = 0, variant: int = 0, faceup: bool = False) -> Card:
+        """Debug-only: chèn trực tiếp 1 lá vào deck tại vị trí tính từ đỉnh."""
+        resolved = self._fuzzy_type(ctype)
+        self._require(resolved is not None, f"Không tìm thấy thẻ '{ctype}' — gõ lại gần tên hơn")
+        self._card_seq += 1
+        v = int(variant)
+        card = Card(id=f"{resolved}.{v}.{self._card_seq}", type=resolved, variant=v, faceup=bool(faceup))
+        idx = max(0, min(len(self.deck.cards), int(index)))
+        self.deck.insert(card, idx)
+        self._say(f"[debug] đặt {resolved} vào deck (#{idx})")
+        return card
+
+    def debug_set_turn(self, name: str, turns_left: int = 1) -> None:
+        """Debug-only: chuyển lượt trực tiếp cho 1 người chơi còn sống."""
+        self._require(self.phase == "playing", "Ván chưa/không diễn ra")
+        p = self._get(name)
+        self._require(p.alive, f"{name} đã chết")
+        self._clear_transient()
+        self.turn_index = self.order.index(name)
+        self.turns_left = max(1, min(10, int(turns_left)))
+        self._say(f"[debug] chuyển lượt cho {name} ({self.turns_left} lượt)")
+
+    def debug_toggle_blind(self, name: str) -> bool:
+        """Debug-only: bật/tắt trạng thái mù cho người chơi."""
+        p = self._get(name)
+        p.blind = not p.blind
+        self._say(f"[debug] {name} {'bị mù' if p.blind else 'hết mù'}")
+        return p.blind
+
+    def debug_remove_card(self, name: str, card_id: str) -> None:
+        """Debug-only: bỏ trực tiếp 1 lá trên tay người chơi vào graveyard."""
+        p = self._get(name)
+        card = p.find(card_id)
+        self._require(card is not None, "Không có thẻ này trên tay")
+        self._leave_hand(p, card)
+        self._to_grave(card)
+        self._say(f"[debug] bỏ {card.type} khỏi tay {name}")
+
+    def debug_snapshot(self) -> dict:
+        """Debug-only: ảnh chụp toàn tri trạng thái ván cho Debug Studio."""
+        deck_top_first = list(reversed(self.deck.cards))[:30]
+        grave_top_first = list(reversed(self.grave))[:20]
+        return {
+            "phase": self.phase,
+            "desk_name": self.desk_name,
+            "winner": self.winner,
+            "turn": {
+                "current": self.order[self.turn_index] if self.order else None,
+                "turns_left": self.turns_left,
+                "direction": self.direction,
+            },
+            "deck_count": self.deck.size(),
+            "deck": [
+                {
+                    "id": c.id,
+                    "type": c.type,
+                    "variant": c.variant,
+                    "faceup": c.faceup,
+                }
+                for c in deck_top_first
+            ],
+            "grave": [c.to_dict() for c in grave_top_first],
+            "playmat": copy.deepcopy(self.playmat),
+            "stash_count": len(self.stash),
+            "tower_wearer": self.tower_wearer,
+            "pending": copy.deepcopy(self.pending) if self.pending is not None else None,
+            "nope": (
+                {
+                    "actor": self.nope["actor"],
+                    "card": self.nope["card"].to_dict(),
+                    "as_type": self.nope.get("as_type"),
+                    "stacked": len(self.nope["stack"]),
+                    "responded": sorted(self.nope["responded"]),
+                    "ends_ms": int(self.nope_deadline * 1000) if self.nope_deadline else None,
+                }
+                if self.nope
+                else None
+            ),
+            "players": [
+                {
+                    "name": self.players[n].name,
+                    "alive": self.players[n].alive,
+                    "blind": self.players[n].blind,
+                    "extra_turns": self.players[n].extra_turns,
+                    "illtake_by": self.players[n].illtake_by,
+                    "marked_id": self.players[n].marked_id,
+                    "standby_defuse": self.players[n].standby_defuse,
+                    "count": len(self.players[n].hand),
+                    "hand": [c.to_dict() for c in self.players[n].hand],
+                }
+                for n in self.order
+            ],
+            "log_entries": [
+                {"seq": seq, "text": text, "private": viewer}
+                for seq, text, viewer in self.log_entries[-50:]
+            ],
+        }
 
     def _resolve_godcat(self, as_type: str | None) -> tuple[str, dict]:
         self._require(isinstance(as_type, str) and as_type, "Thiếu loại thẻ muốn hóa thân")
@@ -357,7 +540,24 @@ class Game:
 
     # ---------- commands ----------
 
-    def play_card(self, name: str, card_id: str, as_type: str | None = None) -> None:
+    def _waste_blind_card(self, p: Player, card: Card) -> None:
+        self._leave_hand(p, card)
+        self._to_grave(card)
+        self._say(f"{p.name} (bị mù) tự đánh nhầm {CARD_META[card.type]['name']} và vứt vào graveyard!")
+
+    def _resolve_blind_card(self, p: Player, card_id: str | None) -> Card:
+        self._require(bool(p.hand), "Bạn không còn thẻ nào")
+        if card_id is None or card_id == "":
+            return random.choice(p.hand)
+        if isinstance(card_id, str) and card_id.startswith("blind."):
+            raw_idx = card_id.split(".", 1)[1]
+            if raw_idx.isascii() and raw_idx.isdigit() and str(int(raw_idx)) == raw_idx:
+                idx = int(raw_idx)
+                if 0 <= idx < len(p.hand):
+                    return p.hand[idx]
+        raise GameError("Lá bài úp không hợp lệ")
+
+    def play_card(self, name: str, card_id: str | None = "", as_type: str | None = None) -> None:
         self._clear_transient()
         self._require(self.phase == "playing", "Ván chưa/không diễn ra")
         self._require(self.pending is None, "Đang chờ quyết định")
@@ -366,20 +566,31 @@ class Game:
         self._require(p.alive, "Bạn đã chết")
         self._require(self._is_current(p), "Chưa tới lượt bạn")
 
-        if p.blind:  # curse: chơi mù — server tự chọn lá ngẫu nhiên
-            self._require(p.hand, "Bạn không còn thẻ nào")
-            card = random.choice(p.hand)
-            self._say(f"{name} (bị mù) chơi ngẫu nhiên 1 lá...")
+        if p.blind:  # curse: chơi mù — chọn lá úp theo slot blind.<idx> (hoặc ngẫu nhiên nếu rỗng)
+            card = self._resolve_blind_card(p, card_id)
+            if card_id:
+                self._say(f"{name} (bị mù) chọn lật 1 lá úp...")
+            else:
+                self._say(f"{name} (bị mù) chơi ngẫu nhiên 1 lá...")
         else:
-            card = p.find(card_id)
+            card = p.find(card_id or "")
             self._require(card is not None, "Không có thẻ này trên tay")
         meta = self._meta(card.type)
-        if p.blind and not meta.get("is_action"):
-            # mù chơi trúng lá không dùng được (nope/cat): lãng phí vào grave
-            self._leave_hand(p, card)
-            self._to_grave(card)
-            self._say(f"{name} (bị mù) lãng phí 1 lá vào graveyard.")
-            return
+        if p.blind:
+            mat_types = {e["card"]["type"] for e in self.playmat}
+            has_dead = any(not self.players[n2].alive for n2 in self.order)
+            unplayable_blind = (
+                not meta.get("is_action")
+                or card.type == "nope"
+                or meta.get("as_any_card")
+                or meta.get("combo_only")
+                or (meta.get("needs_dead") and not has_dead)
+                or (meta.get("needs_playmat_kitten") and not ({"godcat", "devilcat"} <= mat_types))
+                or (card.type == "bury" and p.illtake_by is not None)
+            )
+            if unplayable_blind:
+                self._waste_blind_card(p, card)
+                return
 
         eff_type = card.type
         if meta.get("as_any_card"):  # godcat biến thành thẻ khác
@@ -416,16 +627,17 @@ class Game:
         else:
             self._to_grave(card)
 
-        if eff_type == "clone":
-            effect = lambda: self._apply_clone(p, card, clone_beneath)  # noqa: E731
-        elif card.type == "barkingkitten":
-            effect = lambda: self._apply_barking(p, card)  # noqa: E731
-        else:
-            effect = lambda: self._apply_effect(p, eff_type, card)  # noqa: E731
+        effect = self._make_card_effect(p, card, eff_type, clone_beneath)
 
         if meta.get("nopeable") and len([a for a in self.alive() if a.name != name]) > 0:
-            self.nope = {"actor": name, "card": card, "stack": [], "responded": set(),
-                         "effect": effect}
+            self.nope = {
+                "actor": name,
+                "card": card,
+                "as_type": eff_type if card.type == "godcat" else None,
+                "stack": [],
+                "responded": set(),
+                "effect": effect,
+            }
             return  # Room mở timer 5s rồi gọi resolve_nope()
         effect()
 
@@ -441,6 +653,7 @@ class Game:
         self._require(combo in ("pair", "three"), "Combo không hợp lệ")
         need = 2 if combo == "pair" else 3
         self._require(len(card_ids) == need, f"Cần chọn đúng {need} lá")
+        self._require(len(set(card_ids)) == need, "Không thể chọn trùng một lá bài")
         cards = []
         for cid in card_ids:
             card = p.find(cid)
@@ -466,6 +679,7 @@ class Game:
                 if not cands:
                     self._say("Không có ai để ăn trộm.")
                     return
+                self._emit_fx("card_fx", actor=p.name, card_type="combo_pair", source=named, count=2)
                 self._ask("pick_player", p.name, {"candidates": cands, "reason": "steal"},
                           lambda r, pl=p: self._steal_pick(pl, r["player"]))
             effect = effect_pair
@@ -475,16 +689,27 @@ class Game:
                          if o.name != p.name and (o.hand or (o.name == self.tower_wearer and self.stash))]
                 if not cands:
                     return
+                self._emit_fx("card_fx", actor=p.name, card_type="combo_three", source=named, count=3)
                 self._ask("pick_player", p.name, {"candidates": cands, "reason": "call_card"},
                           lambda r, pl=p: self._three_call(pl, r["player"]))
             effect = effect_three
 
-        self.nope = {"actor": name, "card": cards[0], "stack": [], "responded": set(),
-                     "effect": effect}
+        if len([a for a in self.alive() if a.name != name]) > 0:
+            self.nope = {
+                "actor": name,
+                "card": cards[0],
+                "as_type": None,
+                "stack": [],
+                "responded": set(),
+                "effect": effect,
+            }
+            return
+        effect()
 
     def _take_tower_card(self, taker: Player, wearer: Player) -> None:
         card = random.choice(self.stash)
         self.stash.remove(card)
+        self._emit_fx("transfer", actor=wearer.name, target=taker.name, card_type="tower")
         self._receive_card(taker, card)
         self._say(f"{taker.name} trộm mù 1 thẻ từ Tower of Power của {wearer.name}!")
 
@@ -514,6 +739,7 @@ class Game:
             return
         card = cards[0]
         self._leave_hand(target, card)
+        self._emit_fx("transfer", actor=target.name, target=p.name, card_type="three")
         self._receive_card(p, card)
         self._say(f"{target.name} đưa {p.name} 1 thẻ.")
 
@@ -552,17 +778,24 @@ class Game:
                 mat_types = {e["card"]["type"] for e in self.playmat}
                 self._require({"godcat", "devilcat"} <= mat_types,
                               "Armageddon cần cả Godcat và Devilcat trên bàn")
+            if eff_type == "bury":
+                self._require(p.illtake_by is None,
+                              "Bạn đang bị I'll Take That — không dùng được Bury.")
             clone_beneath = self.grave[-1] if eff_type == "clone" and self.grave else None
+            if not self._is_current(p):
+                self._require(
+                    eff_type not in TURN_ENDING_TYPES,
+                    f"Không thể dùng Godcat như {eff_meta['name']} ngoài lượt",
+                )
+                if eff_type == "clone" and clone_beneath is not None:
+                    self._require(
+                        clone_beneath.type not in TURN_ENDING_TYPES,
+                        "Không thể dùng Godcat Clone thẻ kết thúc lượt ngoài lượt",
+                    )
             self._leave_hand(p, card)
             self.playmat.append({"name": name, "card": card.to_dict()})
             self._say(f"{name} dùng Godcat như {eff_meta['name']} (ngoài lượt)!")
-            if eff_type == "clone":
-                effect = lambda: self._apply_clone(p, card, clone_beneath)  # noqa: E731
-            elif eff_type == "personalattack3x":
-                # Không cướp lượt hiện tại: cộng lượt thưởng cho chính người dùng Godcat.
-                effect = lambda: self._godcat_personal(p)  # noqa: E731
-            else:
-                effect = lambda: self._apply_effect(p, eff_type, card)  # noqa: E731
+            effect = self._make_card_effect(p, card, eff_type, clone_beneath)
             meta = eff_meta
         else:
             self._leave_hand(p, card)
@@ -570,13 +803,36 @@ class Game:
             self._say(f"{name} chơi {meta['name']} (ngoài lượt)!")
             effect = lambda: self._apply_anytime(p, card.type)  # noqa: E731
         if meta.get("nopeable") and len([a for a in self.alive() if a.name != name]) > 0:
-            self.nope = {"actor": name, "card": card, "stack": [], "responded": set(),
-                         "effect": effect}
+            self.nope = {
+                "actor": name,
+                "card": card,
+                "as_type": eff_type if card.type == "godcat" else None,
+                "stack": [],
+                "responded": set(),
+                "effect": effect,
+            }
             return
         effect()
 
+    def _make_card_effect(
+        self, p: Player, card: Card, eff_type: str, clone_beneath: Card | None
+    ):
+        """Tạo closure thực thi hiệu ứng thẻ (chạy sau khi cửa sổ Nope thông qua)."""
+        def effect() -> None:
+            if card.type == "godcat":
+                self._emit_fx("card_fx", actor=p.name, card_type="godcat", source=eff_type)
+            if eff_type == "clone":
+                self._apply_clone(p, card, clone_beneath)
+            elif card.type == "barkingkitten":
+                self._apply_barking(p, card)
+            else:
+                self._apply_effect(p, eff_type, card)
+
+        return effect
+
     def _godcat_personal(self, p: Player) -> None:
         p.extra_turns += 2
+        self._emit_fx("card_fx", actor=p.name, card_type="personalattack3x", count=2)
         self._say(f"{p.name} dùng Godcat như Personal Attack — thêm 2 lượt thưởng!")
 
     def _pending_for(self, name: str) -> dict | None:
@@ -624,10 +880,34 @@ class Game:
                 self._require(0 <= position < len(victim.hand), "Vị trí không hợp lệ")
             elif source == "own_hand":
                 owner = self._get(pending.get("owner", ""))
-                self._require(owner.alive, "Bạn đã chết")
-                card_id = payload.get("card_id")
-                if not isinstance(card_id, str) or owner.find(card_id) is None:
-                    raise GameError("Thẻ không có trong tay bạn")
+                reason = data.get("reason")
+                if not data.get("allow_dead") and reason != "graverobber":
+                    self._require(owner.alive, "Bạn đã chết")
+                if payload.get("random") is True:
+                    self._require(owner.blind, "Chỉ dùng chọn ngẫu nhiên khi bị mù")
+                    self._require(bool(owner.hand), "Bạn không còn thẻ nào")
+                    if reason in ("potluck", "into_deck"):
+                        self._require(
+                            any(c.type != "godcat" for c in owner.hand),
+                            "Godcat không thể đưa vào bộ bài rút",
+                        )
+                elif owner.blind:
+                    card_id = payload.get("card_id")
+                    if not isinstance(card_id, str) or not card_id.startswith("blind."):
+                        raise GameError("Lá bài úp không hợp lệ")
+                    chosen = self._resolve_blind_card(owner, card_id)
+                    if reason in ("potluck", "into_deck") and chosen.type == "godcat":
+                        if any(c.type != "godcat" for c in owner.hand):
+                            raise GameError("Lá úp này không thể đặt vào deck — hãy chọn lá úp khác!")
+                        raise GameError("Godcat không thể đưa vào bộ bài rút")
+                    payload["card_id"] = chosen.id
+                else:
+                    card_id = payload.get("card_id")
+                    card = owner.find(card_id) if isinstance(card_id, str) else None
+                    if card is None:
+                        raise GameError("Thẻ không có trong tay bạn")
+                    if reason in ("potluck", "into_deck") and card.type == "godcat":
+                        raise GameError("Godcat không thể đưa vào bộ bài rút")
             else:
                 raise GameError("Quyết định không hợp lệ")
         elif kind == "input_card":
@@ -671,13 +951,26 @@ class Game:
         self._require(self.pending is not None, "Không có quyết định đang chờ")
         self._require(self.pending["owner"] == name, "Không phải lượt quyết định của bạn")
         self._require(isinstance(payload, dict), "Payload quyết định không hợp lệ")
-        self._validate_pending_response(self.pending, payload)
+        resolved_payload = dict(payload)
+        self._validate_pending_response(self.pending, resolved_payload)
         snap = self.pending
         cont = self._cont
+        if (snap.get("kind") == "pick_card"
+                and (snap.get("data") or {}).get("source") == "own_hand"
+                and resolved_payload.get("random") is True):
+            owner = self._get(name)
+            reason = (snap.get("data") or {}).get("reason")
+            pool = (
+                [c for c in owner.hand if c.type != "godcat"]
+                if reason in ("potluck", "into_deck")
+                else list(owner.hand)
+            ) or list(owner.hand)
+            chosen = random.choice(pool)
+            resolved_payload = {**resolved_payload, "card_id": chosen.id}
         self.pending = None
         self._cont = None
         try:
-            cont(payload)
+            cont(resolved_payload)
         except GameError:
             self.pending, self._cont = snap, cont  # chọn sai -> được chọn lại
             raise
@@ -689,7 +982,8 @@ class Game:
         self._clear_transient()
         self._require(self.nope is not None, "Không có cửa sổ Nope")
         self._require(self.phase == "playing", "Ván đã kết thúc")
-        self._require(name != self.nope["actor"], "Không nope được chính mình")
+        if not self.nope["stack"]:
+            self._require(name != self.nope["actor"], "Không nope được chính mình")
         self._require(name not in self.nope["responded"], "Bạn đã phản hồi rồi")
         p = self._get(name)
         self._require(p.alive, "Bạn đã chết")
@@ -697,18 +991,26 @@ class Game:
         self._require(nope_card is not None, "Bạn không có thẻ Nope")
         self._leave_hand(p, nope_card)
         self.nope["stack"].append(nope_card)
-        self.nope["responded"].add(name)
+        # Reset responded & deadline để mọi người sống khác (kể cả actor gốc) có thể phản Nope (Yup)
+        self.nope["responded"] = {name}
+        self.nope_deadline = None
+        self._emit_fx("nope", actor=name, count=len(self.nope["stack"]))
         self._say(f"{name} tung Nope! ({len(self.nope['stack'])} chồng)")
 
     def pass_nope(self, name: str) -> None:
         self._require(self.nope is not None, "Không có cửa sổ Nope")
-        self._require(name != self.nope["actor"], "Actor không cần phản hồi")
+        if not self.nope["stack"]:
+            self._require(name != self.nope["actor"], "Actor không cần phản hồi")
         self._require(name not in self.nope["responded"], "Bạn đã phản hồi rồi")
-        self._get(name)
+        p = self._get(name)
+        self._require(p.alive, "Bạn đã chết")
         self.nope["responded"].add(name)
 
     def nope_all_responded(self) -> bool:
-        others = [p.name for p in self.alive() if p.name != self.nope["actor"]]
+        if self.nope["stack"]:
+            others = [p.name for p in self.alive()]
+        else:
+            others = [p.name for p in self.alive() if p.name != self.nope["actor"]]
         return all(n in self.nope["responded"] for n in others)
 
     def resolve_nope(self) -> None:
@@ -750,13 +1052,27 @@ class Game:
 
     # ---------- draw resolution ----------
 
+    def _refill_from_grave(self) -> bool:
+        """Xáo graveyard thành deck mới — lọc bỏ bom đã nổ và Imploding mặt ngửa."""
+        if not self.grave:
+            return False
+        recyclable = [
+            c for c in self.grave
+            if c.type != "explodingkitten"
+            and not (c.type == "implodingkitten" and c.faceup)
+        ]
+        if not recyclable:
+            return False
+        recyclable_ids = {c.id for c in recyclable}
+        self.deck.cards = recyclable
+        self.grave = [c for c in self.grave if c.id not in recyclable_ids]
+        self.deck.shuffle()
+        self._say("Deck cạn — xáo graveyard thành deck mới.")
+        return True
+
     def _take_from_deck(self, source: str) -> Card | None:
         card = self.deck.draw_bottom() if source == "bottom" else self.deck.draw_top()
-        if card is None and self.grave:  # deck cạn: xáo grave thành deck mới
-            self.deck.cards = self.grave[:]
-            self.grave = []
-            self.deck.shuffle()
-            self._say("Deck cạn — xáo graveyard thành deck mới.")
+        if card is None and self._refill_from_grave():
             card = self.deck.draw_bottom() if source == "bottom" else self.deck.draw_top()
         return card
 
@@ -774,19 +1090,24 @@ class Game:
             p.illtake_by = None
             if actor and actor.alive and actor is not p:
                 if card.type == "explodingkitten":
+                    self._emit_fx("transfer", actor=p.name, target=actor.name, card_type="illtakethat")
                     self._say(f"{p.name} rút phải bom nhưng bị {actor.name} chặn lấy!")
                     self._handle_bomb(actor, card, remaining=1, end_after=False)
                     if self.phase == "playing":
-                        self._after_one_draw(p, remaining, end_after)
+                        self._after_quiesce(
+                            lambda pl=p, rem=remaining, ea=end_after: self._after_one_draw(pl, rem, ea)
+                        )
                     return
                 if card.type != "implodingkitten":  # ponytail: imploding không intercept
                     actor.hand.append(card)
+                    self._emit_fx("transfer", actor=p.name, target=actor.name, card_type="illtakethat")
                     self._say(f"{p.name} rút thẻ nhưng bị {actor.name} giật mất!")
                     self._after_one_draw(p, remaining, end_after)
                     return
 
         ctype = card.type
         if ctype in BOMBS:
+            self._emit_fx("draw", actor=p.name, source=source)
             if ctype == "implodingkitten" and not card.faceup:
                 self._handle_imploding_first(p, card, remaining, end_after)
             else:
@@ -796,6 +1117,7 @@ class Game:
         # thẻ thường vào tay
         p.hand.append(card)
         p.blind = False  # rút thành công không nổ -> khỏi mù
+        self._emit_fx("draw", actor=p.name, source=source)
         self._say(f"Bạn rút {CARD_META[ctype]['name']}", private=p.name)
         self._after_one_draw(p, remaining, end_after)
 
@@ -816,6 +1138,7 @@ class Game:
         """Lần đầu rút Imploding Kitten (mặt dưới): đặt lại vào deck MẶT LÊN, không tốn Defuse."""
         bomb.faceup = True
         self.revealed = [bomb]
+        self._emit_fx("card_fx", actor=p.name, card_type="imploding_arm")
         self._say(f"😼 {p.name} rút phải Imploding Kitten — đặt lại vào deck MẶT LÊN!")
         self._ask(
             "pick_index", p.name,
@@ -834,15 +1157,16 @@ class Game:
             return
         for i in range(start, len(RESCUE_ORDER)):
             t = RESCUE_ORDER[i]
-            if not p.has_type(t):
+            has_rescue = self._has_defuse(p) if t == "defuse" else p.has_type(t)
+            if not has_rescue:
                 continue
             if t == "defuse":
-                dfuse = next(c for c in p.hand if c.type == "defuse")
-                self._leave_hand(p, dfuse)
-                self._to_grave(dfuse)
-                self._say(f"{p.name} dùng Defuse cho {label}!")
+                used = self._consume_defuse(p)
+                self._emit_fx("defuse", actor=p.name, card_type="defuse")
+                self._say(f"{p.name} dùng {used} cho {label}!")
                 if bomb.type == "implodingkitten":
                     self.deck.insert(bomb, 0)  # lên đỉnh
+                    self._emit_fx("put_deck", actor=p.name, card_type=bomb.type)
                     self._say("Imploding Kitten đặt lên đỉnh deck.")
                     self._after_one_draw(p, remaining, end_after)
                 else:
@@ -893,6 +1217,7 @@ class Game:
                        remaining: int, end_after: bool, then=None) -> None:
         index = max(0, min(int(resp.get("index", 0)), self.deck.size()))
         self.deck.insert(bomb, index)
+        self._emit_fx("put_deck", actor=p.name, card_type=bomb.type)
         self._say(f"{CARD_META[bomb.type]['name']} chèn vào vị trí {index} từ đỉnh.")
         if then:
             then(p, remaining, end_after)
@@ -902,6 +1227,7 @@ class Game:
     def _streaking_keep(self, p: Player, bomb: Card, remaining: int, end_after: bool) -> None:
         # streaking.txt: giữ bom MIỄN LÀ streaking còn trên tay — KHÔNG bỏ streaking
         p.hand.append(bomb)
+        self._emit_fx("defuse", actor=p.name, card_type="streakingkitten")
         self._say(f"{p.name} GIỮ {CARD_META[bomb.type]['name']} trên tay nhờ Streaking Kitten!")
         self._after_one_draw(p, remaining, end_after)
 
@@ -909,6 +1235,7 @@ class Game:
         zomb = next(c for c in p.hand if c.type == "zombiekitten")
         self._leave_hand(p, zomb)
         self._to_grave(zomb)
+        self._emit_fx("defuse", actor=p.name, card_type="zombiekitten")
         self._say(f"🧟 {p.name} dùng Zombie Kitten — bom chèn lại deck!")
         self._ask(
             "pick_index", p.name,
@@ -929,6 +1256,7 @@ class Game:
 
     def _finish_revive(self, p: Player, target_name: str, remaining: int, end_after: bool) -> None:
         self._get(target_name).alive = True
+        self._emit_fx("card_fx", actor=p.name, target=target_name, card_type="zombiekitten")
         self._say(f"👻 {target_name} hồi sinh!")
         self._after_one_draw(p, remaining, end_after)
 
@@ -936,6 +1264,7 @@ class Game:
         god = next(c for c in p.hand if c.type == "godcat")
         self._leave_hand(p, god)
         self.playmat.append({"name": p.name, "card": god.to_dict()})
+        self._emit_fx("defuse", actor=p.name, card_type="godcat")
         self._say(f"{p.name} dùng Godcat như Defuse!")
         self._ask_pick_insert(p, bomb, "godcat_defuse", remaining, end_after)
 
@@ -949,17 +1278,22 @@ class Game:
 
         if t == "defuse":
             self._require(card.type in ("godcat", "clone"), "Defuse không đánh trực tiếp được")
+            p.standby_defuse = True
             self._say(f"{p.name} giữ {CARD_META[card.type]['name']} như Defuse dự phòng trên bàn.")
             return
         if t in ("skip", "superskip"):
+            self._emit_fx("card_fx", actor=p.name, card_type=t)
             self._end_turn(drew=False, force=(t == "superskip"))
         elif t == "shuffle" or t == "shufflenow":
             self.deck.shuffle()
+            self._emit_fx("card_fx", actor=p.name, card_type=t)
             self._say("Deck được xáo.")
         elif t == "clairvoyance":
             self.bomb_watchers.add(p.name)
+            self._emit_fx("card_fx", actor=p.name, card_type="clairvoyance")
             self._say(f"{p.name} mở con mắt tiên tri — thấy vị trí các quả bom trong deck!")
         elif t == "alter3xnow":
+            self._emit_fx("card_fx", actor=p.name, card_type="alter3xnow")
             self._ask_reorder(p, 3, then=lambda: None)
         elif t == "attack2x":
             nxt = self._next_alive(p)
@@ -967,63 +1301,97 @@ class Game:
                 # targetattack.txt: nạn nhân gánh lượt còn dư + 2 (chồng attack: 4 rồi 6...).
                 nxt.extra_turns += self.turns_left
                 self._say(f"{nxt.name} nhận tổng cộng {1 + nxt.extra_turns} lượt!")
+            self._emit_fx(
+                "card_fx", actor=p.name,
+                target=nxt.name if nxt else None,
+                card_type="attack2x",
+                count=(1 + nxt.extra_turns) if nxt else 2,
+            )
             self._end_turn(drew=False, force=True)
         elif t == "targetattack2x":
             cands = [o.name for o in self.alive() if o.name != p.name]
+            if not cands:
+                self._say("Không có mục tiêu để tấn công.")
+                return
             self._ask("pick_player", p.name, {"candidates": cands, "reason": "targetattack"},
                       lambda r, pl=p: self._do_targetattack(pl, r["player"]))
         elif t == "personalattack3x":
-            # Lượt hiện tại đã tính là lượt đầu, chỉ cần thêm 2 lượt nữa để tổng là 3.
-            self.turns_left += 2
-            self._say(f"{p.name} tự tấn công — tổng cộng 3 lượt liên tiếp!")
+            if not self._is_current(p):
+                # Ngoài lượt (vd Godcat / Godcat Clone Personal Attack): cộng lượt thưởng cho chính p.
+                self._godcat_personal(p)
+                return
+            # Lượt thường (1) -> tổng 3 (+2); đã bị chồng lượt (>1) -> cộng đủ +3 lượt.
+            self.turns_left += 2 if self.turns_left == 1 else 3
+            self._emit_fx("card_fx", actor=p.name, card_type="personalattack3x", count=self.turns_left)
+            self._say(f"{p.name} tự tấn công — tổng cộng {self.turns_left} lượt liên tiếp!")
         elif t == "attackofthedead":
             dead = sum(1 for n in self.order if not self.players[n].alive)
+            if dead == 0:
+                self._say("Attack of the Dead vô hiệu — không có người đã chết.")
+                return
             nxt = self._next_alive(p)
             if nxt:
                 # lượt còn dư + 3 mỗi người chết (T=1, D=1 -> tổng 3 như cũ).
                 nxt.extra_turns += self.turns_left + 3 * dead - 2
                 self._say(f"{nxt.name} bị ép tổng cộng {1 + nxt.extra_turns} lượt ({dead} người chết x 3)!")
+            self._emit_fx(
+                "card_fx", actor=p.name,
+                target=nxt.name if nxt else None,
+                card_type="attackofthedead",
+                count=(1 + nxt.extra_turns) if nxt else None,
+            )
             self._end_turn(drew=False, force=True)
         elif t == "reverse":
             self.direction *= -1
+            self._emit_fx("card_fx", actor=p.name, card_type="reverse")
             self._say("Chiều lượt ĐẢO NGƯỢC! Hết lượt không rút.")
             self._end_turn(drew=False)  # giống skip: chỉ hết 1 trong n lượt
         elif t == "drawfromthebottom":
             self._resolve_draw(p, "bottom", 1, end_after=True)
         elif t == "seethefuture3x":
             self._peek_for(p.name, self.deck.peek(3))
+            self._emit_fx("card_fx", actor=p.name, card_type="seethefuture3x")
             self._say(f"{p.name} nhìn trộm 3 thẻ trên cùng.")
         elif t == "seethefuture5x":
             self._peek_for(p.name, self.deck.peek(5))
+            self._emit_fx("card_fx", actor=p.name, card_type="seethefuture5x")
             self._say(f"{p.name} nhìn trộm 5 thẻ trên cùng.")
         elif t == "revealthefuture3x":
             self.revealed = self.deck.peek(3)
+            self._emit_fx("card_fx", actor=p.name, card_type="revealthefuture3x")
             self._say("3 thẻ trên cùng bị lật cho cả bàn!")
         elif t == "sharethefuture3x":
+            self._emit_fx("card_fx", actor=p.name, card_type="sharethefuture3x")
             self._ask_reorder(p, 3, then=lambda pl=p: self._share_show(pl))
         elif t in ("alter3x", "alter5x"):
+            self._emit_fx("card_fx", actor=p.name, card_type=t)
             self._ask_reorder(p, 3 if t == "alter3x" else 5, then=lambda: None)
         elif t == "digdeeper":
+            self._emit_fx("card_fx", actor=p.name, card_type="digdeeper")
             card_dug = self._take_from_deck("top")
             if card_dug is None:
                 self._end_turn(drew=False)
                 return
             self._peek_for(p.name, [card_dug])
             self._ask(
-                "yes_no", p.name, {"question": f"Giữ lá vừa đào ({'ẩn'})?"},
+                "yes_no", p.name,
+                {"reason": "digdeeper", "question": "Giữ lá vừa đào?", "card": card_dug.to_dict()},
                 lambda r, pl=p, cd=card_dug: self._dig_choice(pl, cd, bool(r.get("value"))),
             )
         elif t == "raisingheck":
+            self._emit_fx("card_fx", actor=p.name, card_type="raisingheck")
             card_h = self._take_from_deck("bottom")
             if card_h is None:
-                self._end_turn(drew=False, force=True)
+                self._end_turn(drew=False)
                 return
             self._peek_for(p.name, [card_h])
             self._ask(
-                "yes_no", p.name, {"question": "Giữ lá đáy vừa lôi lên?"},
+                "yes_no", p.name,
+                {"reason": "raisingheck", "question": "Giữ lá đáy vừa lôi lên?", "card": card_h.to_dict()},
                 lambda r, pl=p, ch=card_h: self._heck_choice(pl, ch, bool(r.get("value"))),
             )
         elif t == "bury":
+            self._emit_fx("card_fx", actor=p.name, card_type="bury")
             buried = self._take_from_deck("top")
             if buried is None:
                 self._end_turn(drew=False)
@@ -1039,6 +1407,7 @@ class Game:
             self.tower_wearer = p.name
             self.deck.insert(card, random.randint(0, self.deck.size()))
             self.deck.shuffle()
+            self._emit_fx("card_fx", actor=p.name, card_type="towerofpower")
             self._say(f"{p.name} đội Tower of Power — stash vẫn nằm dưới vương miện ({len(self.stash)} lá).")
         elif t == "armageddon":
             self._do_armageddon(p)
@@ -1048,16 +1417,18 @@ class Game:
             if not cands:
                 self._say("Không có ai có thẻ để xin.")
                 return
+            self._emit_fx("card_fx", actor=p.name, card_type="favor")
             self._ask("pick_player", p.name, {"candidates": cands, "reason": "favor"},
                       lambda r, pl=p: self._do_favor_pick(pl, r["player"]))
         elif t == "potluck":
+            self._emit_fx("card_fx", actor=p.name, card_type="potluck")
             idx = self.order.index(p.name)
             step = self.direction
             givers = []
             n = len(self.order)
             for k in range(n):
                 cand = self.players[self.order[(idx + step * k) % n]]
-                if cand.alive and cand.hand:
+                if cand.alive and any(c.type != "godcat" for c in cand.hand):
                     givers.append(cand.name)
             self._chain_potluck(p, givers)
         elif t == "illtakethat":
@@ -1070,24 +1441,37 @@ class Game:
                       lambda r, pl=p: self._do_illtake(pl, r["player"]))
         elif t == "mark":
             cands = [o.name for o in self.alive() if o.name != p.name and o.hand]
+            if not cands:
+                self._say("Không có ai còn thẻ để Mark.")
+                return
             self._ask("pick_player", p.name, {"candidates": cands, "reason": "mark"},
                       lambda r, pl=p: self._do_mark(pl, r["player"]))
         elif t == "curseofthecatbutt":
             cands = [o.name for o in self.alive() if o.name != p.name]
+            if not cands:
+                self._say("Không có mục tiêu để Curse.")
+                return
             self._ask("pick_player", p.name, {"candidates": cands, "reason": "curse"},
-                      lambda r: self._do_curse(r["player"]))
+                      lambda r, pl=p: self._do_curse(pl.name, r["player"]))
         elif t == "garbagecollection":
-            participants = [p.name] if p.hand else []
-            participants.extend(o.name for o in self.alive()
-                                if o.name != p.name and o.hand)
-            self._chain_into_deck(participants, then_shuffle=True)
+            self._emit_fx("card_fx", actor=p.name, card_type="garbagecollection")
+            participants = [p.name] if any(c.type != "godcat" for c in p.hand) else []
+            participants.extend(
+                o.name for o in self.alive()
+                if o.name != p.name and any(c.type != "godcat" for c in o.hand)
+            )
+            self._chain_into_deck(participants, then_shuffle=True, allow_dead=False)
         elif t == "graverobber":
-            dead_with_cards = [n for n in self.order
-                              if not self.players[n].alive and self.players[n].hand]
+            self._emit_fx("card_fx", actor=p.name, card_type="graverobber")
+            dead_with_cards = [
+                n for n in self.order
+                if not self.players[n].alive
+                and any(c.type != "godcat" for c in self.players[n].hand)
+            ]
             if not dead_with_cards:
                 self._say("Không người chết nào còn bài.")
                 return
-            self._chain_into_deck(dead_with_cards, then_shuffle=True)
+            self._chain_into_deck(dead_with_cards, then_shuffle=True, allow_dead=True)
         elif t == "feedthedead":
             self._do_feed(p)
         elif t == "catomicbomb":
@@ -1097,9 +1481,13 @@ class Game:
             random.shuffle(rest)
             self.revealed = list(bombs_in_deck)
             self.deck.cards = rest + bombs_in_deck  # mọi bom chồng lên đỉnh
+            self._emit_fx("card_fx", actor=p.name, card_type="catomicbomb")
             self._say(f"💣 CATOMIC BOMB! {len(bombs_in_deck)} quả bom lộ diện và xếp chồng lên đỉnh deck!")
             self._end_turn(drew=False, force=True)
+        elif t == "devilcat":
+            self._emit_fx("card_fx", actor=p.name, card_type="devilcat")
         elif t == "swaptopandbottom":
+            self._emit_fx("card_fx", actor=p.name, card_type="swaptopandbottom")
             if self.deck.size() >= 2:
                 self.deck.cards[0], self.deck.cards[-1] = self.deck.cards[-1], self.deck.cards[0]
                 self._say("Top ↔ Bottom deck hoán đổi úp (không ai được xem).")
@@ -1109,16 +1497,20 @@ class Game:
     def _apply_anytime(self, actor: Player, ctype: str) -> None:
         if ctype == "shufflenow":
             self.deck.shuffle()
+            self._emit_fx("card_fx", actor=actor.name, card_type="shufflenow")
             self._say("Deck được xáo (NOW).")
         elif ctype == "clairvoyance":
             self.bomb_watchers.add(actor.name)
+            self._emit_fx("card_fx", actor=actor.name, card_type="clairvoyance")
             self._say(f"{actor.name} mở con mắt tiên tri — thấy vị trí các quả bom trong deck!")
         elif ctype == "alter3xnow":
+            self._emit_fx("card_fx", actor=actor.name, card_type="alter3xnow")
             self._ask_reorder(actor, 3, then=lambda: None)
         elif ctype == "feedthedead":
             self._do_feed(actor)
 
     def _apply_barking(self, p: Player, card: Card) -> None:
+        self._emit_fx("card_fx", actor=p.name, card_type="barkingkitten")
         holder = next((o for o in self.alive()
                        if o.name != p.name and o.has_type("barkingkitten")), None)
         faceup_owner = None
@@ -1134,6 +1526,8 @@ class Game:
                 p.faceup.remove(mine)
                 self._to_grave(mine)
                 cands = [o.name for o in self.alive() if o.name != p.name]
+                if not cands:
+                    return
                 self._ask("pick_player", p.name, {"candidates": cands, "reason": "barking"},
                           lambda r: self._defuse_or_die(self._get(r["player"])))
                 return
@@ -1158,12 +1552,23 @@ class Game:
         if beneath is None or beneath.type == "clone":
             self._say("Clone vô hiệu — không có thẻ hợp lệ bên dưới.")
             return
+        bmeta = CARD_META.get(beneath.type, {})
+        if not bmeta.get("is_action") or beneath.type in ("nope", "godcat", "devilcat"):
+            self._say(f"Clone vô hiệu — không thể sao chép {bmeta.get('name', beneath.type)}.")
+            return
+        if bmeta.get("needs_dead") and not any(not self.players[n2].alive for n2 in self.order):
+            self._say(f"Clone vô hiệu — {bmeta['name']} cần có người đã chết.")
+            return
         if beneath.type == "armageddon":
             mat_types = {e["card"]["type"] for e in self.playmat}
             if not ({"godcat", "devilcat"} <= mat_types):
                 self._say("Clone vô hiệu — Armageddon cần cả Godcat và Devilcat trên bàn.")
                 return
-        self._say(f"Clone hóa thành {CARD_META[beneath.type]['name']}!")
+        if beneath.type == "bury" and p.illtake_by is not None:
+            self._say("Clone vô hiệu — bạn đang bị I'll Take That, không dùng được Bury.")
+            return
+        self._emit_fx("card_fx", actor=p.name, card_type="clone", source=beneath.type)
+        self._say(f"Clone hóa thành {bmeta['name']}!")
         self._apply_effect(p, beneath.type, card)  # lá vật lý là Clone, chỉ mượn hiệu ứng
 
     def _do_armageddon(self, p: Player) -> None:
@@ -1186,6 +1591,7 @@ class Game:
         if not cands:
             self.playmat.extend([god_entry, devil_entry])
             raise GameError("Cần ít nhất một người chơi khác cho Armageddon")
+        self._emit_fx("card_fx", actor=p.name, card_type="armageddon")
         self._say("☄️ ARMAGEDDON! Hai lá playmat được chia úp cho hai người!")
         self._ask("pick_player", p.name,
                   {"candidates": cands, "reason": "armageddon_target"},
@@ -1218,26 +1624,31 @@ class Game:
     def _resolve_armageddon_fate(self, holder: Player, card: Card) -> None:
         if card.type == "godcat":
             holder.hand.append(card)
+            self._emit_fx("receive", actor=holder.name, card_type="godcat")
             self._say(f"😇 {holder.name} NHẬN GODCAT!")
             return
-        dfuse = next((c for c in holder.hand if c.type == "defuse"), None)
-        if dfuse:
-            self._leave_hand(holder, dfuse)
-            self._to_grave(dfuse)
-            self._say(f"{holder.name} bỏ Defuse để sống sót trước Devilcat.")
+        used = self._consume_defuse(holder)
+        if used:
+            self._emit_fx("defuse", actor=holder.name, card_type="defuse")
+            self._say(f"{holder.name} dùng {used} để sống sót trước Devilcat.")
             return
         zomb = next((c for c in holder.hand if c.type == "zombiekitten"), None)
         if zomb is not None:  # godcat.txt: Defuse hoặc Zombie cứu khỏi Devilcat
             self._leave_hand(holder, zomb)
             self._to_grave(zomb)
+            self._emit_fx("defuse", actor=holder.name, card_type="zombiekitten")
             self._say(f"{holder.name} dùng Zombie Kitten để sống sót trước Devilcat.")
             return
         self._say(f"😈 {holder.name} lật trúng DEVILCAT!")
-        self._kill(holder)
+        self._kill(holder, cause="devilcat")
 
     def _do_targetattack(self, p: Player, target_name: str) -> None:
         target = self._get(target_name)
         target.extra_turns += self.turns_left  # lượt còn dư + 2
+        self._emit_fx(
+            "card_fx", actor=p.name, target=target.name,
+            card_type="targetattack2x", count=1 + target.extra_turns,
+        )
         self._say(f"{target.name} bị tấn công — nhận tổng cộng {1 + target.extra_turns} lượt!")
         self._end_turn(drew=False, force=True)
 
@@ -1256,6 +1667,7 @@ class Game:
         card = src.find(card_id)
         self._require(card is not None, "Thẻ không có trong tay nguồn")
         self._leave_hand(src, card)
+        self._emit_fx("transfer", actor=src.name, target=dst.name, card_type="favor")
         self._receive_card(dst, card)
         self._say(f"{src.name} đưa {dst.name} 1 thẻ.")
 
@@ -1282,7 +1694,10 @@ class Game:
         self._cont = wrapped
 
     def _chain_potluck(self, receiver_ign: Player, names: list[str]) -> None:
-        names = [n for n in names if self.players[n].alive and self.players[n].hand]
+        names = [
+            n for n in names
+            if self.players[n].alive and any(c.type != "godcat" for c in self.players[n].hand)
+        ]
         if not names:
             return
         head, rest = names[0], names[1:]
@@ -1291,8 +1706,10 @@ class Game:
         def step(resp: dict, gv=giver, tail=rest) -> None:
             card = gv.find(resp.get("card_id", ""))
             self._require(card is not None, "Thẻ không có trong tay bạn")
+            self._require(card.type != "godcat", "Godcat không thể đưa vào bộ bài rút")
             self._leave_hand(gv, card)
             self.deck.insert(card, 0)  # lên đỉnh deck
+            self._emit_fx("put_deck", actor=gv.name, card_type="potluck")
             self._say(f"{gv.name} đặt 1 thẻ lên ĐỈNH deck (Potluck).")
             self._after_quiesce(lambda: self._chain_potluck(None, tail))
 
@@ -1303,20 +1720,30 @@ class Game:
         self._require(not target.illtake_by,
                       f"{target_name} đã có bẫy I'll Take That trước mặt.")
         target.illtake_by = p.name
+        self._emit_fx("card_fx", actor=p.name, target=target.name, card_type="illtakethat")
         self._say(f"{p.name} đặt bẫy trước {target_name}: lá rút kế tiếp thuộc về {p.name}!")
 
     def _do_mark(self, p: Player, target_name: str) -> None:
         target = self._get(target_name)
         card = random.choice(target.hand)
         target.marked_id = card.id
+        self._emit_fx("card_fx", actor=p.name, target=target.name, card_type="mark")
         self._say(f"📌 {target.name} bị Mark: lá {CARD_META[card.type]['name']} lộ diện đến khi played/stolen!")
 
-    def _do_curse(self, target_name: str) -> None:
-        self._get(target_name).blind = True
-        self._say(f"😼 Curse of the Cat Butt: {target_name} bị MÙ — úp bài tới khi rút thành công!")
+    def _do_curse(self, actor_name: str, target_name: str) -> None:
+        target = self._get(target_name)
+        target.blind = True
+        random.shuffle(target.hand)
+        self._emit_fx("card_fx", actor=actor_name, target=target_name, card_type="curseofthecatbutt")
+        self._say(f"😼 Curse of the Cat Butt: {target_name} bị MÙ — bài bị xáo úp tới khi rút thành công!")
 
-    def _chain_into_deck(self, names: list[str], then_shuffle: bool) -> None:
-        names = [n for n in names if self.players[n].hand]
+    def _chain_into_deck(self, names: list[str], then_shuffle: bool,
+                         allow_dead: bool = False) -> None:
+        names = [
+            n for n in names
+            if ((not self.players[n].alive) if allow_dead else self.players[n].alive)
+            and any(c.type != "godcat" for c in self.players[n].hand)
+        ]
         if not names:
             if then_shuffle:
                 self.deck.shuffle()
@@ -1327,12 +1754,23 @@ class Game:
         def step(resp: dict, ct=contributor, tail=rest) -> None:
             card = ct.find(resp.get("card_id", ""))
             self._require(card is not None, "Thẻ không có trong tay bạn")
+            self._require(card.type != "godcat", "Godcat không thể đưa vào bộ bài rút")
             self._leave_hand(ct, card)
             self.deck.insert(card, random.randint(0, self.deck.size()))
+            self._emit_fx(
+                "put_deck",
+                actor=ct.name,
+                card_type="graverobber" if allow_dead else "garbagecollection",
+            )
             self._say(f"{ct.name} cài lén 1 thẻ vào deck.")
-            self._after_quiesce(lambda: self._chain_into_deck(tail, then_shuffle=then_shuffle))
+            self._after_quiesce(
+                lambda: self._chain_into_deck(tail, then_shuffle=then_shuffle, allow_dead=allow_dead)
+            )
 
-        self._ask("pick_card", head, {"source": "own_hand", "reason": "into_deck"}, step)
+        data = {"source": "own_hand", "reason": "into_deck"}
+        if allow_dead:
+            data["allow_dead"] = True
+        self._ask("pick_card", head, data, step)
 
     def _do_feed(self, actor: Player) -> None:
         dead = [n for n in self.order if not self.players[n].alive]
@@ -1350,6 +1788,7 @@ class Game:
 
         def finish() -> None:
             target.alive = True
+            self._emit_fx("card_fx", actor=actor.name, target=dead_name, card_type="feedthedead")
             self._say(f"👻 {dead_name} hồi sinh với {len(target.hand)} thẻ được tặng!")
 
         if not givers:
@@ -1362,6 +1801,7 @@ class Game:
             self._require(card is not None, "Thẻ không có trong tay bạn")
             self._leave_hand(giver, card)
             target.hand.append(card)
+            self._emit_fx("transfer", actor=giver.name, target=target.name, card_type="feedthedead")
             self._say(f"{giver.name} dâng 1 thẻ cho {dead_name}.")
             rest = [n for n in rest if self.players[n].alive and self.players[n].hand]
             if rest:
@@ -1384,6 +1824,7 @@ class Game:
             self._require(card is not None, "Thẻ không có trong tay bạn")
             self._leave_hand(gv, card)
             target.hand.append(card)
+            self._emit_fx("transfer", actor=gv.name, target=target.name, card_type="feedthedead")
             self._say(f"{gv.name} dâng 1 thẻ cho {target.name}.")
             if tail:
                 self._after_quiesce(lambda: self._chain_givers(target, tail, finish))
@@ -1395,30 +1836,42 @@ class Game:
 
     def _dig_choice(self, p: Player, card: Card, keep: bool) -> None:
         if keep:
+            self._emit_fx("draw", actor=p.name, source="top")
             if card.type in BOMBS:
-                # digdeeper.txt: giữ lá đào = rút nó — bom phải nổ (Defuse/chết)
+                # digdeeper.txt: giữ lá đào = rút nó — bom phải nổ (hoặc Imploding úp mặt)
                 self._say(f"{p.name} giữ lá vừa đào... là {CARD_META[card.type]['name']}!")
-                self._handle_bomb(p, card, remaining=1, end_after=False)
-                if self.phase == "playing":
-                    self._after_one_draw(p, 1, end_after=True)
+                if card.type == "implodingkitten" and not card.faceup:
+                    self._handle_imploding_first(p, card, remaining=1, end_after=True)
+                else:
+                    self._handle_bomb(p, card, remaining=1, end_after=True)
                 return
             p.hand.append(card)
             p.blind = False
             self._say(f"{p.name} giữ lá vừa đào. Hết lượt!")
             self._after_one_draw(p, 1, end_after=True)
         else:
-            self.deck.insert(card, 0)  # trả lên đúng ĐỈNH (top = cuối list)
-            self._say(f"{p.name} từ chối — phải rút lá kế tiếp!")
-            self._resolve_draw(p, "top", 1, end_after=True)
+            # digdeeper.txt: rút lá KẾ TIẾP và đặt lá từ chối lên ĐỈNH deck
+            if self.deck.size() == 0:
+                self._refill_from_grave()
+            if self.deck.size() >= 1:
+                self.deck.insert(card, 1)  # đặt ngay dưới lá đỉnh -> rút lá đỉnh xong lá từ chối nằm trên đỉnh
+                self._say(f"{p.name} từ chối — phải rút lá kế tiếp!")
+                self._resolve_draw(p, "top", 1, end_after=True)
+            else:
+                self.deck.insert(card, 0)
+                self._say(f"{p.name} từ chối nhưng không còn thẻ kế tiếp — trả thẻ lên đỉnh deck.")
+                self._end_turn(drew=False)
 
     def _heck_choice(self, p: Player, card: Card, keep: bool) -> None:
         if keep:
+            self._emit_fx("draw", actor=p.name, source="bottom")
             if card.type in BOMBS:
-                # raisingheck: giữ lá đáy = rút nó — bom phải nổ (Defuse/chết)
+                # raisingheck: giữ lá đáy = rút nó — bom phải nổ (hoặc Imploding úp mặt)
                 self._say(f"{p.name} giữ lá đáy... là {CARD_META[card.type]['name']}!")
-                self._handle_bomb(p, card, remaining=1, end_after=False)
-                if self.phase == "playing":
-                    self._end_turn(drew=False, force=True)
+                if card.type == "implodingkitten" and not card.faceup:
+                    self._handle_imploding_first(p, card, remaining=1, end_after=True)
+                else:
+                    self._handle_bomb(p, card, remaining=1, end_after=True)
                 return
             p.hand.append(card)
             p.blind = False
@@ -1426,11 +1879,12 @@ class Game:
         else:
             self.deck.cards.append(card)  # lên đỉnh deck
             self._say(f"{p.name} đặt lá đáy lên đỉnh deck.")
-        self._end_turn(drew=False, force=True)
+        self._end_turn(drew=False)
 
     def _bury_place(self, p: Player, card: Card, resp: dict) -> None:
         index = max(0, min(int(resp.get("index", 0)), self.deck.size()))
         self.deck.insert(card, index)
+        self._emit_fx("put_deck", actor=p.name, card_type="bury")
         self._say(f"{p.name} vùi lặng 1 lá vào vị trí {index} từ đỉnh. Hết lượt!")
         self._after_one_draw(p, 1, end_after=True)
 
@@ -1442,6 +1896,10 @@ class Game:
 
     def _ask_reorder(self, p: Player, n: int, then) -> None:
         top = self.deck.peek(min(n, self.deck.size()))
+        if not top:
+            self._say("Deck không còn thẻ nào để sắp xếp.")
+            then()
+            return
         self._ask(
             "reorder", p.name,
             {"cards": [c.to_dict() for c in top]},
@@ -1468,7 +1926,13 @@ class Game:
         me = self.players[name]
         you = {
             "name": me.name, "alive": me.alive,
-            "hand": [] if me.blind else [c.to_dict() for c in me.hand],
+            "hand": (
+                [{"id": f"blind.{i}", "type": "hidden", "variant": 0, "blind_index": i}
+                 for i in range(len(me.hand))]
+                if me.blind
+                else [c.to_dict() for c in me.hand]
+            ),
+            "hand_count": len(me.hand),
             "blind": me.blind,
             "marked": None if me.blind else next(
                 (c.to_dict() for c in me.hand if c.id == me.marked_id), None),
@@ -1491,8 +1955,12 @@ class Game:
                     "is_turn": n2 == self.order[self.turn_index],
                     "blind": self.players[n2].blind,
                     "faceup": [c.to_dict() for c in self.players[n2].faceup],
-                    "marked": next((c.to_dict() for c in self.players[n2].hand
-                                    if c.id == self.players[n2].marked_id), None),
+                    "marked": (
+                        None if (n2 == name and me.blind)
+                        else next((c.to_dict() for c in self.players[n2].hand
+                                   if c.id == self.players[n2].marked_id), None)
+                    ),
+                    "illtake_by": self.players[n2].illtake_by,
                     "extra_turns": self.players[n2].extra_turns,
                 }
                 for n2 in self.order
@@ -1514,8 +1982,13 @@ class Game:
             "nope_window": ({
                 "actor": self.nope["actor"],
                 "card": self.nope["card"].to_dict(),
+                "as_type": self.nope.get("as_type"),
                 "stacked": len(self.nope["stack"]),
+                "you_responded": name in self.nope["responded"],
                 "ends_ms": int(self.nope_deadline * 1000) if self.nope_deadline else None,
             } if self.nope else None),
             "log": self.log_for(name),
+            "log_entries": self.log_entries_for(name),
+            "last_boom": self.last_boom,
+            "fx_events": list(self._fx_events[-12:]),
         }

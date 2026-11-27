@@ -487,7 +487,14 @@ class TestPlayerEffects:
         assert g.pending["kind"] == "pick_player"
         g.respond(first, {"player": other})
         assert g.players[other].blind
-        assert g.view(other)["you"]["hand"] == []
+        real_ids = {c.id for c in g.players[other].hand}
+        real_types = {c.type for c in g.players[other].hand}
+        blind_hand = g.view(other)["you"]["hand"]
+        assert blind_hand == [
+            {"id": f"blind.{i}", "type": "hidden", "variant": 0, "blind_index": i}
+            for i in range(len(g.players[other].hand))
+        ]
+        assert all(c["id"] not in real_ids and c["type"] not in real_types for c in blind_hand)
 
     def test_blind_random_play_and_cure(self):
         g = make_game(2)

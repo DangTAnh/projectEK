@@ -1,0 +1,123 @@
+{
+  "name": "barking-kittens",
+  "title": "Barking Kittens: Expansion",
+  "deck_type": "Expansion",
+  "base_merged": true,
+  "card_count": 76,
+  "expansion_card_count": 20,
+  "description": "This is the third expansion of Exploding Kittens. It introduces 20 new cards including a pair of Barking Kitten cards that work like a game of chicken.",
+  "theme_color": "#fef1d1",
+  "source_url": "https://explodi.ng/decks/barking-kittens-expansion",
+  "cards": {
+    "alter3xnow": {
+      "0": 2
+    },
+    "barkingkitten": {
+      "0": 1,
+      "1": 1
+    },
+    "bury": {
+      "0": 1,
+      "1": 1
+    },
+    "illtakethat": {
+      "0": 1,
+      "1": 1,
+      "2": 1,
+      "3": 1
+    },
+    "personalattack3x": {
+      "0": 1,
+      "1": 1,
+      "2": 1,
+      "3": 1
+    },
+    "potluck": {
+      "0": 1,
+      "1": 1
+    },
+    "sharethefuture3x": {
+      "0": 1,
+      "1": 1
+    },
+    "superskip": {
+      "0": 1
+    },
+    "towerofpower": {
+      "0": 1
+    },
+    "attack2x": {
+      "0": 1,
+      "1": 1,
+      "2": 1,
+      "3": 1
+    },
+    "cat": {
+      "0": 1,
+      "1": 1,
+      "2": 1,
+      "3": 1,
+      "4": 1,
+      "5": 1,
+      "6": 1,
+      "7": 1,
+      "9": 1,
+      "10": 1,
+      "11": 1,
+      "12": 1,
+      "13": 1,
+      "14": 1,
+      "15": 1,
+      "16": 1,
+      "17": 1,
+      "18": 1,
+      "19": 1,
+      "20": 1
+    },
+    "defuse": {
+      "0": 1,
+      "1": 1,
+      "2": 1,
+      "3": 1,
+      "4": 1,
+      "5": 1
+    },
+    "explodingkitten": {
+      "0": 1,
+      "1": 1,
+      "2": 1,
+      "3": 1
+    },
+    "favor": {
+      "0": 1,
+      "1": 1,
+      "2": 1,
+      "3": 1
+    },
+    "nope": {
+      "0": 1,
+      "1": 1,
+      "2": 1,
+      "3": 1,
+      "4": 1
+    },
+    "seethefuture3x": {
+      "0": 2,
+      "1": 1,
+      "2": 1,
+      "3": 1
+    },
+    "shuffle": {
+      "0": 1,
+      "1": 1,
+      "2": 1,
+      "3": 1
+    },
+    "skip": {
+      "0": 1,
+      "1": 1,
+      "2": 1,
+      "3": 1
+    }
+  }
+}
