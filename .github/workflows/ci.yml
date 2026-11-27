@@ -42,7 +42,7 @@ jobs:
         run: python -m compileall -q server tests
 
       - name: Run pytest suite
-        run: pytest -v
+        run: python -m pytest -v
 
   frontend:
     name: Frontend Build (React + Vite)
