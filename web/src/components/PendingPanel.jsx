@@ -330,7 +330,6 @@ function isBombCard(card) {
 
 function ReorderForm({ cards, catalog, connected, onInspectCard, onDone }) {
   const [order, setOrder] = useState(() => cards.map((c) => c.id))
-  const [swapIdx, setSwapIdx] = useState(null)
 
   const firstCard = cards.find((x) => x.id === order[0])
   const firstIsBomb = isBombCard(firstCard)
@@ -341,23 +340,6 @@ function ReorderForm({ cards, catalog, connected, onInspectCard, onDone }) {
     const next = order.slice()
     ;[next[i], next[j]] = [next[j], next[i]]
     setOrder(next)
-    setSwapIdx(null)
-  }
-
-  function handleCardClick(i) {
-    if (!connected) return
-    if (swapIdx === null) {
-      setSwapIdx(i)
-      return
-    }
-    if (swapIdx === i) {
-      setSwapIdx(null)
-      return
-    }
-    const next = order.slice()
-    ;[next[swapIdx], next[i]] = [next[i], next[swapIdx]]
-    setOrder(next)
-    setSwapIdx(null)
   }
 
   return (
@@ -370,7 +352,7 @@ function ReorderForm({ cards, catalog, connected, onInspectCard, onDone }) {
           </span>
         )}
       </div>
-      <p className="reorder-swap-hint">Bấm 2 lá để đổi chỗ nhanh, hoặc dùng nút ← → bên dưới</p>
+      <p className="reorder-swap-hint">Bấm vào lá bài để xem chi tiết, dùng nút ← → để đổi thứ tự</p>
       <ol className="reorder-list reorder-oracle-list">
         {order.map((id, i) => {
           const c = cards.find((x) => x.id === id)
@@ -383,7 +365,7 @@ function ReorderForm({ cards, catalog, connected, onInspectCard, onDone }) {
                 <li className="reorder-arrow-sep" aria-hidden="true">➔</li>
               )}
               <li
-                className={`reorder-card-item ${i === 0 ? 'is-next' : ''} ${isBomb ? 'is-bomb' : ''} ${swapIdx === i ? 'is-swap-armed' : ''} ${swapIdx !== null && swapIdx !== i ? 'is-swap-target' : ''}`.trim()}
+                className={`reorder-card-item ${i === 0 ? 'is-next' : ''} ${isBomb ? 'is-bomb' : ''}`.trim()}
               >
                 <span className="reorder-pos">
                   {i === 0 ? '#1 · NEXT DRAW' : `#${i + 1}`}
@@ -392,33 +374,11 @@ function ReorderForm({ cards, catalog, connected, onInspectCard, onDone }) {
                   <button
                     type="button"
                     className="reorder-card-surface"
-                    disabled={!connected}
-                    aria-pressed={swapIdx === i}
-                    title={
-                      swapIdx === null
-                        ? `Chọn ${cardName} để đổi chỗ`
-                        : swapIdx === i
-                          ? 'Bỏ chọn đổi chỗ'
-                          : `Đổi chỗ với #${swapIdx + 1}`
-                    }
-                    onClick={() => handleCardClick(i)}
+                    aria-label={`Xem chi tiết ${cardName}`}
+                    title={`Bấm để xem chi tiết ${cardName}`}
+                    onClick={() => onInspectCard?.(c)}
                   >
                     <CardView small card={c} catalog={catalog} />
-                  </button>
-                  <button
-                    type="button"
-                    className="reorder-zoom-btn"
-                    aria-label={`Phóng to ${cardName}`}
-                    title={`Phóng to ${cardName}`}
-                    onClick={(e) => {
-                      e.stopPropagation()
-                      onInspectCard?.(c)
-                    }}
-                  >
-                    <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
-                      <circle cx="11" cy="11" r="7" />
-                      <path d="m20 20-3.5-3.5" />
-                    </svg>
                   </button>
                 </div>
                 <span className="reorder-name">{cardName}</span>

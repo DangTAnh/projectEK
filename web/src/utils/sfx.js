@@ -212,6 +212,18 @@ export function playSfx(kind) {
         tone(ac, { freq: 523.25, type: 'triangle', dur: 0.1, gain: 0.07, delay: 0 })
         tone(ac, { freq: 659.25, type: 'triangle', dur: 0.14, gain: 0.07, delay: 0.09 })
         break
+      case 'tick':
+        noiseBurst(ac, {
+          dur: 0.024,
+          gain: 0.085,
+          delay: 0,
+          filterType: 'bandpass',
+          filterFreq: 3000,
+          endFreq: 1900,
+          q: 2.4,
+        })
+        tone(ac, { freq: 1180, endFreq: 760, type: 'triangle', dur: 0.042, gain: 0.06, delay: 0 })
+        break
       case 'nope':
         tone(ac, { freq: 240, endFreq: 160, type: 'sawtooth', dur: 0.14, gain: 0.06, delay: 0 })
         tone(ac, { freq: 170, endFreq: 110, type: 'sawtooth', dur: 0.18, gain: 0.06, delay: 0.12 })

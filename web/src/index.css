@@ -991,6 +991,9 @@ button.leave:hover:not(:disabled) {
   margin-top: 10px;
   padding-bottom: 242px;
 }
+.main-cols.is-spectator {
+  padding-bottom: 10px;
+}
 .main-cols .table { flex: 1 1 auto; }
 .side-col {
   flex: none; width: 300px; min-height: 0;
@@ -1079,6 +1082,151 @@ button.leave:hover:not(:disabled) {
   color: var(--text);
   padding-left: 8px;
   border-left: 1px solid var(--line);
+}
+.turn-timer-badge {
+  display: inline-flex; align-items: center; justify-content: center;
+  min-width: 38px; padding: 2px 9px; border-radius: 999px;
+  font-family: var(--font-mono); font-size: 12px; font-weight: 800;
+  background: var(--surface-2); color: var(--text);
+  border: 1px solid var(--line-strong);
+  font-variant-numeric: tabular-nums;
+  transition: background-color 0.18s ease, border-color 0.18s ease, color 0.18s ease;
+}
+.turn-timer-badge.warn {
+  background: rgba(242, 92, 59, 0.16);
+  border-color: rgba(242, 92, 59, 0.48);
+  color: var(--brand-hi);
+}
+.turn-timer-badge.urgent {
+  background: rgba(229, 72, 77, 0.24);
+  border-color: var(--danger);
+  color: #fecaca;
+  animation: timer-pulse 0.6s ease-in-out infinite;
+}
+@keyframes timer-pulse {
+  0%, 100% { transform: scale(1); }
+  50% { transform: scale(1.07); }
+}
+
+/* Center-table turn announcement banner (non-blocking) */
+.turn-banner {
+  position: absolute; left: 50%; top: 50%; transform: translate(-50%, -50%);
+  z-index: 22; pointer-events: none;
+  display: flex; flex-direction: column; align-items: center; gap: 3px;
+  padding: 12px 26px; border-radius: 16px;
+  background: rgba(27, 23, 20, 0.94);
+  border: 1.5px solid var(--line-strong);
+  box-shadow: 0 18px 46px rgba(0, 0, 0, 0.72);
+  text-align: center;
+  animation: turn-banner-in 1.55s cubic-bezier(0.2, 1.15, 0.35, 1) both;
+}
+.turn-banner.mine {
+  border-color: var(--brand);
+  box-shadow: 0 18px 48px rgba(0, 0, 0, 0.76), 0 0 0 2px rgba(242, 92, 59, 0.25);
+}
+.turn-banner-eyebrow {
+  font-size: 10px; font-weight: 900; letter-spacing: 1.5px;
+  text-transform: uppercase; color: var(--muted);
+}
+.turn-banner.mine .turn-banner-eyebrow { color: var(--brand-hi); }
+.turn-banner-title {
+  display: inline-flex; align-items: center; gap: 10px; flex-wrap: wrap; justify-content: center;
+  font-family: var(--font-display); font-size: clamp(20px, 2.6vw, 28px);
+  font-weight: 800; line-height: 1.15; color: var(--text);
+  white-space: nowrap;
+}
+.turn-banner-multi {
+  padding: 2px 10px; border-radius: 999px;
+  font-size: 13px; font-weight: 800;
+  background: rgba(229, 72, 77, 0.22);
+  border: 1px solid rgba(229, 72, 77, 0.55);
+  color: #fecaca;
+}
+@keyframes turn-banner-in {
+  0% { opacity: 0; transform: translate(-50%, -44%) scale(0.92); }
+  14% { opacity: 1; transform: translate(-50%, -50%) scale(1.02); }
+  22% { opacity: 1; transform: translate(-50%, -50%) scale(1); }
+  80% { opacity: 1; transform: translate(-50%, -50%) scale(1); }
+  100% { opacity: 0; transform: translate(-50%, -56%) scale(0.97); }
+}
+
+/* Spectator banner */
+.spectator-banner {
+  margin-top: 8px; padding: 7px 14px; border-radius: 11px; flex: none;
+  display: flex; align-items: center; justify-content: space-between; gap: 10px; flex-wrap: wrap;
+  background: #28221d; border: 1px solid rgba(242, 92, 59, 0.42);
+  color: var(--text); font-size: 13px; font-weight: 700;
+}
+.spectator-banner-main {
+  display: inline-flex; align-items: center; gap: 8px;
+}
+.spectator-pill-tag {
+  padding: 2px 8px; border-radius: 999px;
+  font-size: 10.5px; font-weight: 900; letter-spacing: 0.7px; text-transform: uppercase;
+  background: rgba(242, 92, 59, 0.16); border: 1px solid rgba(242, 92, 59, 0.45);
+  color: var(--brand-hi);
+}
+.spectator-count-tag {
+  font-size: 12px; font-weight: 700; color: var(--muted);
+}
+
+/* Synchronized deck loading stage */
+.loading-stage {
+  flex: 1 1 auto; min-height: 0;
+  display: grid; place-items: center;
+  padding: 20px 12px;
+}
+.loading-card {
+  width: min(92vw, 520px);
+  padding: 26px 28px;
+  border-radius: 18px;
+  background: var(--surface);
+  border: 1px solid var(--line-strong);
+  box-shadow: var(--shadow-lg);
+  display: grid; gap: 16px;
+  animation: rise-in 0.25s ease both;
+}
+.loading-card-head { display: grid; gap: 4px; }
+.loading-card-head h2 { font-size: 24px; color: var(--text); line-height: 1.18; }
+.loading-card-head p { font-size: 13.5px; color: var(--muted); font-weight: 600; }
+.loading-progress-wrap { display: grid; gap: 8px; }
+.loading-progress-meta {
+  display: flex; align-items: center; justify-content: space-between; gap: 8px;
+  font-size: 13px; font-weight: 800; color: var(--text);
+}
+.loading-progress-pct {
+  font-family: var(--font-mono); color: var(--brand-hi);
+}
+.loading-progress-track {
+  width: 100%; height: 10px; border-radius: 999px; overflow: hidden;
+  background: #191512; border: 1px solid var(--line);
+}
+.loading-progress-fill {
+  height: 100%; border-radius: 999px;
+  background: linear-gradient(90deg, var(--brand), var(--brand-hi));
+  transition: width 0.18s ease;
+}
+.loading-players {
+  display: flex; flex-wrap: wrap; gap: 8px;
+}
+.loading-player-pill {
+  display: inline-flex; align-items: center; gap: 6px;
+  padding: 4px 11px; border-radius: 999px;
+  font-size: 12.5px; font-weight: 700;
+  background: var(--surface-2); border: 1px solid var(--line);
+  color: var(--muted);
+}
+.loading-player-pill.ready {
+  background: rgba(52, 199, 123, 0.14);
+  border-color: rgba(52, 199, 123, 0.45);
+  color: #8be6b3;
+}
+.loading-player-dot {
+  width: 7px; height: 7px; border-radius: 50%; flex: none;
+  background: var(--muted-dim);
+}
+.loading-player-pill.ready .loading-player-dot {
+  background: var(--safe);
 }
 
 /* Left-Docked Deck + Centered Discard */
@@ -2049,9 +2197,16 @@ button.leave:hover:not(:disabled) {
     margin-top: 8px;
     padding-bottom: 168px;
   }
+  .main-cols.is-spectator {
+    padding-bottom: 8px;
+  }
   .table { padding: 10px 12px; border-radius: 12px; }
   .turn-hud { padding: 4px 10px; gap: 7px; }
   .turn-who, .turn-dir, .turn-tower { font-size: 11.5px; }
+  .turn-timer-badge { font-size: 11px; padding: 1px 7px; min-width: 32px; }
+  .turn-banner { padding: 9px 18px; max-width: calc(100% - 20px); }
+  .turn-banner-title { font-size: 19px; white-space: normal; }
+  .spectator-banner { padding: 6px 10px; font-size: 12px; }
   .table-top { justify-content: flex-start; align-items: center; gap: 14px; padding: 8px 10px; }
   .pile-col.discard-col { flex: 1 1 auto; }
   .midfield { width: 150px; height: 140px; max-width: 100%; flex: none; }
