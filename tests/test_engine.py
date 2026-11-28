@@ -333,6 +333,58 @@ class TestFutureCards:
         act(g, first, "revealthefuture3x")
         assert [c.to_dict() for c in g.revealed] == expected
 
+    def test_sharethefuture_shows_next_alive_and_persists_until_next_acts(self):
+        g = make_game(3)
+        first = cur(g).name
+        nxt = g._next_alive(g.current()).name
+        other = next(n for n in g.order if n not in (first, nxt))
+        # Đảm bảo lá đỉnh sau reorder không phải bom để draw() an toàn
+        g.debug_put_deck("skip", index=0)
+        g.debug_put_deck("favor", index=0)
+        g.debug_put_deck("shuffle", index=0)
+        give(g, first, "sharethefuture3x")
+        act(g, first, "sharethefuture3x")
+        assert g.pending["kind"] == "reorder"
+        ids = [c["id"] for c in g.pending["data"]["cards"]]
+        reordered = list(reversed(ids))
+        g.respond(first, {"order": reordered})
+
+        expected = [c.to_dict() for c in g.deck.peek(3)]
+        assert [c["id"] for c in expected] == reordered
+        nxt_view = g.view(nxt)["you"]
+        assert nxt_view.get("peek") == expected
+        assert nxt_view.get("peek_meta", {}).get("source") == "share"
+        assert nxt_view.get("peek_meta", {}).get("from") == first
+        assert "peek" not in g.view(first)["you"]
+        assert "peek" not in g.view(other)["you"]
+
+        # Người đánh tiếp tục rút kết lượt -> người kế tiếp vẫn giữ peek đã được chia sẻ
+        g.draw(first)
+        assert cur(g).name == nxt
+        assert g.view(nxt)["you"].get("peek") == expected
+
+        # Khi chính người kế tiếp hành động -> peek được dọn
+        give(g, nxt, "skip")
+        act(g, nxt, "skip")
+        assert "peek" not in g.view(nxt)["you"]
+
+    def test_sharethefuture_respects_direction_and_skips_dead(self):
+        g = make_game(4)
+        first = cur(g).name
+        idx = g.order.index(first)
+        g.direction = -1
+        dead_name = g.order[(idx - 1) % 4]
+        expected_nxt = g.order[(idx - 2) % 4]
+        g.players[dead_name].alive = False
+
+        give(g, first, "sharethefuture3x")
+        act(g, first, "sharethefuture3x")
+        ids = [c["id"] for c in g.pending["data"]["cards"]]
+        g.respond(first, {"order": ids})
+
+        assert g.view(expected_nxt)["you"].get("peek") == [c.to_dict() for c in g.deck.peek(3)]
+        assert "peek" not in g.view(dead_name)["you"]
+
     def test_clairvoyance_bomb_positions(self):
         g = make_game(2)
         first = cur(g).name

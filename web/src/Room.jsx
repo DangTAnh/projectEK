@@ -632,7 +632,8 @@ export default function Room({ code }) {
   const me = view?.you || null
   const hand = me?.hand
   const lastPeekSigRef = useRef('')
-  const peekSig = (me?.peek || []).map((c, idx) => c?.id || `${c?.type || 'x'}-${idx}`).join('|')
+  const peekCardsSig = (me?.peek || []).map((c, idx) => c?.id || `${c?.type || 'x'}-${idx}`).join('|')
+  const peekSig = peekCardsSig ? `${me?.peek_meta?.seq ?? ''}:${peekCardsSig}` : ''
   useEffect(() => {
     if (peekSig && peekSig !== lastPeekSigRef.current) {
       lastPeekSigRef.current = peekSig
@@ -1473,6 +1474,7 @@ export default function Room({ code }) {
           )}
           <FutureVisionPanel
             cards={me.peek}
+            peekMeta={me.peek_meta}
             open={peekOpen}
             onToggle={() => setPeekOpen((o) => !o)}
             catalog={catalog}

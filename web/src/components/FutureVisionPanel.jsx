@@ -62,11 +62,18 @@ function BombDotIcon({ size = 15 }) {
   )
 }
 
-function FutureVisionPanel({ cards, open, onToggle, catalog, onInspectCard }) {
+function FutureVisionPanel({ cards, peekMeta, open, onToggle, catalog, onInspectCard }) {
   if (!cards?.length) return null
 
   const hasBomb = cards.some((c) => isBombType(c?.type))
   const bombFirst = isBombType(cards[0]?.type)
+  const isShared = peekMeta?.source === 'share'
+  const sharedBy = peekMeta?.from || ''
+  const eyebrow = isShared ? 'SHARE THE FUTURE' : 'SEE THE FUTURE'
+  const title = isShared
+    ? (sharedBy ? `${sharedBy} chia sẻ Top ${cards.length} lá` : `Được chia sẻ Top ${cards.length} lá`)
+    : `Top ${cards.length} Cards`
+  const dockLabel = isShared ? `Chia sẻ · Top ${cards.length}` : `Top ${cards.length}`
 
   if (!open) {
     return (
@@ -74,11 +81,11 @@ function FutureVisionPanel({ cards, open, onToggle, catalog, onInspectCard }) {
         type="button"
         className={`fv-dock-pill ${hasBomb ? 'has-bomb' : ''}`}
         onClick={onToggle}
-        title="Mở lại tầm nhìn tương lai"
+        title={isShared ? 'Mở lại các lá được chia sẻ' : 'Mở lại tầm nhìn tương lai'}
         aria-expanded={false}
       >
         <EyeIcon size={15} />
-        <span className="fv-dock-label">Top {cards.length}</span>
+        <span className="fv-dock-label">{dockLabel}</span>
         {hasBomb && (
           <span className="fv-dock-danger">
             <span className="fv-dock-danger-dot" aria-hidden="true" />
@@ -93,12 +100,12 @@ function FutureVisionPanel({ cards, open, onToggle, catalog, onInspectCard }) {
     <section
       className={`fv-stage ${hasBomb ? 'has-bomb' : ''}`}
       role="region"
-      aria-label="See the Future — Top Deck Cards"
+      aria-label={isShared ? 'Share the Future — Shared Top Deck Cards' : 'See the Future — Top Deck Cards'}
     >
       <header className="fv-header">
         <div className="fv-title-group">
-          <span className="fv-eyebrow">SEE THE FUTURE</span>
-          <h3 className="fv-title">Top {cards.length} Cards</h3>
+          <span className="fv-eyebrow">{eyebrow}</span>
+          <h3 className="fv-title">{title}</h3>
         </div>
 
         <div className="fv-header-controls">

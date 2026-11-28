@@ -47,6 +47,8 @@ class Game:
         self.nope_deadline: float | None = None  # Room gán epoch seconds
         self.revealed: list[Card] = []
         self.private_peeks: dict[str, list[dict]] = {}  # name -> cards chỉ người đó thấy
+        self.private_peek_meta: dict[str, dict] = {}  # name -> {seq, source, from}
+        self._peek_seq = 0
         self.bomb_watchers: set[str] = set()  # clairvoyance: thấy vị trí bomb trong deck
         self.log: list[str] = []  # tương thích: chỉ dòng công khai
         self.private_log: dict[str, list[str]] = {}  # name -> dòng log chỉ người đó thấy
@@ -141,9 +143,21 @@ class Game:
                 self._say(f"💥 {p.name} mất Streaking Kitten — Exploding Kitten trên tay nổ!")
                 self._handle_bomb(p, carried, remaining=1, end_after=False)
 
-    def _peek_for(self, name: str, cards: list[Card]) -> None:
+    def _peek_for(
+        self,
+        name: str,
+        cards: list[Card],
+        *,
+        source: str = "peek",
+        shared_by: str | None = None,
+    ) -> None:
         if cards:
+            self._peek_seq += 1
             self.private_peeks[name] = [c.to_dict() for c in cards]
+            meta: dict = {"seq": self._peek_seq, "source": source}
+            if shared_by is not None:
+                meta["from"] = shared_by
+            self.private_peek_meta[name] = meta
 
     def _check_win(self) -> bool:
         alives = self.alive()
@@ -153,14 +167,20 @@ class Game:
             self.pending = None
             self._cont = None
             self.nope = None
+            self._clear_transient()
             if self.winner:
                 self._say(f"🎉 {self.winner} thắng ván này!")
             return True
         return False
 
-    def _clear_transient(self) -> None:
+    def _clear_transient(self, actor: str | None = None) -> None:
         self.revealed = []
-        self.private_peeks = {}
+        if actor is None:
+            self.private_peeks = {}
+            self.private_peek_meta = {}
+        else:
+            self.private_peeks.pop(actor, None)
+            self.private_peek_meta.pop(actor, None)
 
     def _ask(self, kind: str, owner: str, data: dict, cont) -> None:
         self.pending = {"kind": kind, "owner": owner, "data": data}
@@ -176,8 +196,8 @@ class Game:
 
     def _next_alive(self, p: Player) -> Player | None:
         n = len(self.order)
-        idx = self.turn_index
-        for _ in range(n):
+        idx = self.order.index(p.name) if p.name in self.order else self.turn_index
+        for _ in range(n - 1):
             idx = (idx + self.direction) % n
             cand = self.players[self.order[idx]]
             if cand.alive:
@@ -558,7 +578,7 @@ class Game:
         raise GameError("Lá bài úp không hợp lệ")
 
     def play_card(self, name: str, card_id: str | None = "", as_type: str | None = None) -> None:
-        self._clear_transient()
+        self._clear_transient(actor=name)
         self._require(self.phase == "playing", "Ván chưa/không diễn ra")
         self._require(self.pending is None, "Đang chờ quyết định")
         self._require(self.nope is None, "Đang có cửa sổ Nope")
@@ -643,7 +663,7 @@ class Game:
 
     def play_combo(self, name: str, combo: str, card_ids: list) -> None:
         """Combo: pair (2 lá cùng tên) hoặc three (3 lá cùng tên) — feralcat là wildcard."""
-        self._clear_transient()
+        self._clear_transient(actor=name)
         self._require(self.phase == "playing", "Ván chưa/không diễn ra")
         self._require(self.pending is None, "Đang chờ quyết định")
         self._require(self.nope is None, "Đang có cửa sổ Nope")
@@ -744,7 +764,7 @@ class Game:
         self._say(f"{target.name} đưa {p.name} 1 thẻ.")
 
     def draw(self, name: str) -> None:
-        self._clear_transient()
+        self._clear_transient(actor=name)
         self._require(self.phase == "playing", "Ván chưa/không diễn ra")
         self._require(self.pending is None, "Đang chờ quyết định")
         self._require(self.nope is None, "Đang có cửa sổ Nope")
@@ -755,7 +775,7 @@ class Game:
 
     def play_now(self, name: str, card_id: str, as_type: str | None = None) -> None:
         """Thẻ anytime: shufflenow, clairvoyance, alter3xnow, feedthedead, godcat-as-card."""
-        self._clear_transient()
+        self._clear_transient(actor=name)
         self._require(self.phase == "playing", "Ván chưa/không diễn ra")
         self._require(self.pending is None, "Đang chờ quyết định")
         self._require(self.nope is None, "Đang có cửa sổ Nope")
@@ -946,7 +966,7 @@ class Game:
             self._require(has_hand or has_crown, "Người này không còn gì để lấy")
 
     def respond(self, name: str, payload: dict) -> None:
-        self._clear_transient()
+        self._clear_transient(actor=name)
         self._require(self.phase == "playing", "Ván chưa/không diễn ra")
         self._require(self.pending is not None, "Không có quyết định đang chờ")
         self._require(self.pending["owner"] == name, "Không phải lượt quyết định của bạn")
@@ -979,7 +999,7 @@ class Game:
             raise GameError("Payload quyết định không hợp lệ") from exc
 
     def stack_nope(self, name: str) -> None:
-        self._clear_transient()
+        self._clear_transient(actor=name)
         self._require(self.nope is not None, "Không có cửa sổ Nope")
         self._require(self.phase == "playing", "Ván đã kết thúc")
         if not self.nope["stack"]:
@@ -1015,11 +1035,11 @@ class Game:
 
     def resolve_nope(self) -> None:
         """Đóng cửa sổ nope: số Nope lẻ => hành động bị hủy; chẵn => hiệu ứng chạy."""
-        self._clear_transient()
         self._require(self.nope is not None, "Không có cửa sổ Nope")
-        noped = len(self.nope["stack"]) % 2 == 1
         actor_name, card, stack, effect = (
             self.nope["actor"], self.nope["card"], self.nope["stack"], self.nope["effect"])
+        self._clear_transient(actor=actor_name)
+        noped = len(stack) % 2 == 1
         label = CARD_META.get(card.type, {}).get("name", card.type)
         self.nope = None
         self.nope_deadline = None
@@ -1890,9 +1910,10 @@ class Game:
 
     def _share_show(self, p: Player) -> None:
         nxt = self._next_alive(p)
-        if nxt:
-            self._peek_for(nxt.name, self.deck.peek(3))
-            self._say(f"{p.name} chia sẻ 3 thẻ trên cùng cho {nxt.name} xem.")
+        shared = self.deck.peek(3)
+        if nxt and shared:
+            self._peek_for(nxt.name, shared, source="share", shared_by=p.name)
+            self._say(f"{p.name} chia sẻ {len(shared)} thẻ trên cùng cho {nxt.name} xem.")
 
     def _ask_reorder(self, p: Player, n: int, then) -> None:
         top = self.deck.peek(min(n, self.deck.size()))
@@ -1941,6 +1962,8 @@ class Game:
         }
         if name in self.private_peeks:
             you["peek"] = self.private_peeks[name]
+            if name in self.private_peek_meta:
+                you["peek_meta"] = self.private_peek_meta[name]
         if name in self.bomb_watchers:
             you["bomb_positions"] = self._bomb_positions()
         return {
