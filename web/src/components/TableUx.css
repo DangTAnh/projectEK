@@ -1,0 +1,77 @@
+/* Scoped UX rules for Issue #8 (drag-selection guard) and Issue #11 (reorder card inspect & controls) */
+
+.room,
+.lobby-stage,
+.table,
+.hand,
+.player-chip,
+.topbar {
+  user-select: none;
+  -webkit-user-select: none;
+}
+
+.room img,
+.lobby-stage img,
+.table img,
+.hand img,
+.player-chip img,
+.topbar img {
+  -webkit-user-drag: none;
+  user-select: none;
+  -webkit-user-select: none;
+}
+
+input,
+textarea,
+.log-box,
+.crash pre {
+  user-select: text;
+  -webkit-user-select: text;
+}
+
+.reorder-card-surface {
+  transition: transform 0.16s ease, filter 0.16s ease;
+  cursor: zoom-in;
+}
+
+.reorder-card-surface:hover {
+  transform: translateY(-3px) scale(1.02);
+  filter: drop-shadow(0 6px 14px rgba(0, 0, 0, 0.42));
+}
+
+.reorder-card-surface:focus-visible {
+  outline: 2px solid var(--brand);
+  outline-offset: 3px;
+}
+
+.reorder-arrows {
+  display: flex;
+  gap: 8px;
+  margin-top: 2px;
+}
+
+.reorder-arrows button {
+  min-width: 38px;
+  height: 30px;
+  padding: 0 12px;
+  border-radius: 9px;
+  font-size: 15px;
+  font-weight: 800;
+  line-height: 1;
+  background: var(--surface-3);
+  border: 1px solid var(--line-strong);
+  color: var(--text);
+  transition: background-color 0.15s ease, border-color 0.15s ease, transform 0.12s ease;
+}
+
+.reorder-arrows button:hover:not(:disabled) {
+  background: var(--brand);
+  border-color: var(--brand);
+  color: #ffffff;
+  transform: translateY(-1px);
+}
+
+.reorder-arrows button:disabled {
+  opacity: 0.35;
+  cursor: not-allowed;
+}
