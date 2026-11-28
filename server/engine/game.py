@@ -142,8 +142,8 @@ class Game:
         p.hand.remove(card)
         if p.marked_id == card.id:
             p.marked_id = None
-        # Streaking Kitten rời tay (trộm/combo/favor/potluck/...): EK trên tay nổ
-        if card.type == "streakingkitten" and self.phase == "playing":
+        # Streaking Kitten rời tay (trộm/combo/favor/potluck/...): EK trên tay nổ (chỉ khi còn sống)
+        if card.type == "streakingkitten" and self.phase == "playing" and p.alive:
             carried = next((c for c in p.hand if c.type == "explodingkitten"), None)
             if carried is not None:
                 self._leave_hand(p, carried)
@@ -1128,6 +1128,75 @@ class Game:
             self.pending, self._cont = snap, cont  # payload hỏng không được xóa pending
             raise GameError("Payload quyết định không hợp lệ") from exc
 
+    def auto_resolve_dead_pending(self, *, include_revive: bool = False) -> bool:
+        """Tự động chọn ngẫu nhiên nếu pending hiện tại rơi vào người đã chết để tránh treo bàn."""
+        resolved_any = False
+        for _ in range(16):
+            if self.phase != "playing" or self.pending is None or self.nope is not None:
+                break
+            owner_name = self.pending.get("owner")
+            owner = self.players.get(owner_name or "")
+            if owner is None or owner.alive:
+                break
+            kind = self.pending.get("kind")
+            data = self.pending.get("data") or {}
+            if not include_revive and kind == "pick_player" and data.get("reason") == "revive":
+                break
+            payload: dict | None = None
+            if kind == "pick_card":
+                source = data.get("source")
+                if source == "own_hand":
+                    reason = data.get("reason")
+                    pool = (
+                        [c for c in owner.hand if c.type != "godcat"]
+                        if reason in ("potluck", "into_deck")
+                        else list(owner.hand)
+                    )
+                    if not pool:
+                        self.pending = None
+                        self._cont = None
+                        resolved_any = True
+                        break
+                    chosen = random.choice(pool)
+                    cid = f"blind.{owner.hand.index(chosen)}" if owner.blind else chosen.id
+                    payload = {"card_id": cid}
+                elif source == "victim_hand":
+                    cnt = int(data.get("count", 0) or 0)
+                    if cnt <= 0:
+                        self.pending = None
+                        self._cont = None
+                        resolved_any = True
+                        break
+                    payload = {"position": random.randrange(cnt)}
+            elif kind == "pick_player":
+                cands = list(data.get("candidates") or [])
+                if not cands:
+                    self.pending = None
+                    self._cont = None
+                    resolved_any = True
+                    break
+                payload = {"player": random.choice(cands)}
+            elif kind == "pick_index":
+                lo = int(data.get("min", 0))
+                hi = int(data.get("max", lo))
+                payload = {"index": random.randint(lo, max(lo, hi))}
+            elif kind == "yes_no":
+                payload = {"value": False}
+            elif kind == "reorder":
+                cards = data.get("cards") or []
+                payload = {"order": [c["id"] for c in cards if isinstance(c, dict) and "id" in c]}
+            elif kind == "input_card":
+                payload = {"text": ""}
+            if payload is None:
+                break
+            self._say(f"🪦 {owner.name} (đã chết) — hệ thống tự động chọn ngẫu nhiên để tiếp tục ván đấu.")
+            try:
+                self.respond(owner.name, payload)
+                resolved_any = True
+            except GameError:
+                break
+        return resolved_any
+
     def stack_nope(self, name: str) -> None:
         self._clear_transient(actor=name)
         self._require(self.nope is not None, "Không có cửa sổ Nope")
@@ -2087,6 +2156,25 @@ class Game:
             return
         head, rest = names[0], names[1:]
         contributor = self.players[head]
+
+        # Người chơi đã chết: tự động chọn ngẫu nhiên 1 thẻ hợp lệ (khác Godcat) để không làm treo bàn
+        if not contributor.alive:
+            eligible = [c for c in contributor.hand if c.type != "godcat"]
+            if eligible:
+                chosen = random.choice(eligible)
+                self._leave_hand(contributor, chosen)
+                self.deck.insert(chosen, random.randint(0, self.deck.size()))
+                self._emit_fx(
+                    "put_deck",
+                    actor=contributor.name,
+                    card_type="graverobber" if allow_dead else "garbagecollection",
+                )
+                label = "Grave Robber" if allow_dead else "cài bài vào deck"
+                self._say(f"🪦 {contributor.name} (đã chết) tự động chọn ngẫu nhiên 1 thẻ cài vào deck ({label}).")
+            self._after_quiesce(
+                lambda: self._chain_into_deck(rest, then_shuffle=then_shuffle, allow_dead=allow_dead)
+            )
+            return
 
         def step(resp: dict, ct=contributor, tail=rest) -> None:
             card = ct.find(resp.get("card_id", ""))

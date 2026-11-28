@@ -198,6 +198,10 @@ class Room:
                 self.sessions.pop(clean, None)
                 self._disconnected_at.pop(clean, None)
                 self.avatars.pop(clean, None)
+            elif self.game.phase == "playing":
+                player = self.game.players.get(clean)
+                if player is not None and not player.alive:
+                    self.game.auto_resolve_dead_pending(include_revive=True)
             return True
         return False
 

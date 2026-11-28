@@ -262,22 +262,23 @@ def test_blind_hides_own_marked():
 # ---------- P0/P1 engine fixes & contract tests ----------
 
 
-def test_graverobber_dead_player_can_submit_card():
+def test_graverobber_dead_player_auto_picks_random_non_godcat():
     g = make_game(3)
     first, dead = g.order[0], g.order[2]
     g.players[dead].alive = False
-    dead_card = give(g, dead, "skip")
+    god = Card(id="godcat.0.gr", type="godcat", variant=0)
+    dead_card = Card(id="skip.0.gr", type="skip", variant=0)
+    g.players[dead].hand = [god, dead_card]
     give(g, first, "graverobber")
     deck_before = g.deck.size()
     act(g, first, "graverobber")
-    assert g.pending is not None
-    assert g.pending["owner"] == dead
-    assert g.pending["kind"] == "pick_card"
-    assert g.pending["data"]["source"] == "own_hand"
-    g.respond(dead, {"card_id": dead_card.id})
+    # Người chết tự động chọn ngẫu nhiên 1 thẻ hợp lệ (không phải Godcat), không mở pending treo bàn
     assert g.pending is None
     assert dead_card not in g.players[dead].hand
+    assert god in g.players[dead].hand
+    assert any(c.id == dead_card.id for c in g.deck.cards)
     assert g.deck.size() == deck_before + 1
+    assert any(dead in line and "tự động chọn ngẫu nhiên" in line for line in g.log)
 
 
 def test_digdeeper_decline_draws_second_card_and_leaves_first_on_top():

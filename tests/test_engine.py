@@ -1012,6 +1012,34 @@ class TestMisc:
         with pytest.raises(GameError):
             play_type(g, first, "graverobber")
 
+    def test_graverobber_auto_random_multiple_dead_and_dead_pending_safety(self):
+        g = make_game(4)
+        first, d1, d2 = g.order[0], g.order[2], g.order[3]
+        g.players[d1].alive = False
+        g.players[d2].alive = False
+        c1 = Card(id="favor.0.gr1", type="favor", variant=0)
+        god1 = Card(id="godcat.0.gr1", type="godcat", variant=0)
+        sk2 = Card(id="streakingkitten.0.gr2", type="streakingkitten", variant=0)
+        ek2 = Card(id="explodingkitten.0.gr2", type="explodingkitten", variant=0)
+        g.players[d1].hand = [god1, c1]
+        g.players[d2].hand = [sk2, ek2]
+        deck_before = g.deck.size()
+
+        give(g, first, "graverobber")
+        act(g, first, "graverobber")
+        assert g.pending is None
+        assert g.deck.size() == deck_before + 2
+        assert god1 in g.players[d1].hand and c1 not in g.players[d1].hand
+        assert len(g.players[d2].hand) == 1
+
+        # Trường hợp người chết đang giữ pending revive (vd ngắt kết nối giữa chừng) -> auto_resolve_dead_pending giải phóng
+        ftd = give(g, d1, "feedthedead")
+        g.play_now(d1, ftd.id)
+        all_pass(g)
+        assert g.pending is not None and g.pending["owner"] == d1
+        assert g.auto_resolve_dead_pending(include_revive=True) is True
+        assert g.pending is None or g.pending["owner"] != d1
+
     def test_towerofpower_returns_to_deck(self):
         g = make_game(2)
         first = cur(g).name

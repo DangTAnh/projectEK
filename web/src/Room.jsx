@@ -1047,7 +1047,7 @@ export default function Room({ code }) {
   }
 
   function toggleSelect(id) {
-    if (!me?.alive && !(givePending && myPending?.data?.reason === 'into_deck')) return
+    if (!me?.alive) return
     if (me?.blind) {
       setSelected((sel) => (sel.includes(id) ? [] : [id]))
       return
@@ -1068,7 +1068,7 @@ export default function Room({ code }) {
 
   function startDrag(e, card) {
     if (e.button !== 0 || drag) return
-    const giveMode = !!givePending && (me.alive || myPending?.data?.reason === 'into_deck')
+    const giveMode = !!givePending && !!me.alive
     const blindMode = !!me.blind
     const allowTablePlay = !giveMode && canPlayToTable(card)
     if (!me.alive && !giveMode && !allowTablePlay) return
@@ -1203,7 +1203,7 @@ export default function Room({ code }) {
     (c) => (c.type === 'clairvoyance' && canClairvoyance && !view.nope_window)
       || (c.type === 'feedthedead' && !view.pending && !view.nope_window),
   )
-  const isDeadLocked = !me.alive && !(givePending && myPending?.data?.reason === 'into_deck') && !hasDeadAnytime
+  const isDeadLocked = !me.alive && !hasDeadAnytime
 
   return (
     <div className={`room ${shake ? 'shake' : ''}`}>
