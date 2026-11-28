@@ -710,9 +710,15 @@ class Game:
             card = p.find(cid)
             self._require(card is not None, f"Không có thẻ {cid}")
             cards.append(card)
-        core_types = [c.type for c in cards if c.type not in ("feralcat", "clone")]
+        core_cards = [c for c in cards if c.type not in ("feralcat", "clone")]
+        core_types = [c.type for c in core_cards]
         if core_types:
             self._require(len(set(core_types)) == 1, "Các lá không cùng loại")
+            if core_types[0] == "cat":
+                self._require(
+                    len({c.variant for c in core_cards}) == 1,
+                    "Các lá Mèo (Cat) phải cùng loại mèo (cùng hình) mới ghép combo được",
+                )
             # Feral Cat / Clone chỉ thay thế lá Cat, không dùng cho Shuffle/Attack/...
             if any(c.type in ("feralcat", "clone") for c in cards):
                 self._require(core_types[0] == "cat", "Feral Cat/Clone chỉ thay thế lá Cat")

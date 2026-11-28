@@ -30,8 +30,8 @@ def give(g, name, ctype, variant=0):
             card = g.deck.cards.pop(i)
             g.players[name].hand.append(card)
             return card
-    from server.engine.cards import Card
-    card = Card(id=f"{ctype}.{variant}.test", type=ctype, variant=variant)
+    g._card_seq += 1
+    card = Card(id=f"{ctype}.{variant}.test.{g._card_seq}", type=ctype, variant=variant)
     g.players[name].hand.append(card)
     return card
 
@@ -503,6 +503,22 @@ class TestComboSteal:
         give(g, first, "skip")
         with pytest.raises(GameError):  # mèo + action không thành combo
             g.play_combo(first, "pair", hand_ids(g, first)[-2:])
+
+    def test_combo_rejects_different_cat_variants(self):
+        g = make_game(2)
+        first = cur(g).name
+        c1 = give(g, first, "cat", 23)
+        c2 = give(g, first, "cat", 24)
+        feral = give(g, first, "feralcat", 0)
+        with pytest.raises(GameError):  # 2 lá cat khác loại (khác variant)
+            g.play_combo(first, "pair", [c1.id, c2.id])
+        with pytest.raises(GameError):  # 2 lá cat khác loại + feralcat cũng không hợp lệ
+            g.play_combo(first, "three", [c1.id, c2.id, feral.id])
+        # Cùng loại mèo (cùng variant) hoặc 1 cat + feralcat vẫn hợp lệ
+        c1_dup = give(g, first, "cat", 23)
+        g.play_combo(first, "pair", [c1.id, c1_dup.id])
+        all_pass(g)
+        assert g.pending is not None and g.pending["kind"] == "pick_player"
 
     def test_receive_bomb_kills_without_defuse(self):
         g = make_game(2)

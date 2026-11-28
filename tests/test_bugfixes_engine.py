@@ -24,7 +24,8 @@ def give(g, name, ctype, variant=0):
     for i, c in enumerate(g.deck.cards):
         if c.type == ctype and c.variant == variant:
             return g.players[name].hand.append(g.deck.cards.pop(i)) or g.players[name].hand[-1]
-    card = Card(id=f"{ctype}.{variant}.test", type=ctype, variant=variant)
+    g._card_seq += 1
+    card = Card(id=f"{ctype}.{variant}.test.{g._card_seq}", type=ctype, variant=variant)
     g.players[name].hand.append(card)
     return card
 
@@ -190,8 +191,8 @@ def test_three_call_does_not_yield_feral_for_action_query():
     g = make_game(2)
     first, other = g.order[0], g.order[1]
     force_turn(g, first)
-    for v in (1, 2, 3):
-        give(g, first, "cat", v)
+    for _ in range(3):
+        give(g, first, "cat", 0)
     feral = give(g, other, "feralcat")
     n_before = len(g.players[first].hand)
     g.play_combo(first, "three", hand_ids(g, first)[-3:])
@@ -1003,7 +1004,7 @@ def test_fx_events_transfers_privacy_and_put_deck():
 
     # 2. Pair steal transfer
     c1 = give(g, first, "cat", 1)
-    c2 = give(g, first, "cat", 2)
+    c2 = give(g, first, "cat", 1)
     secret_steal = Card(id="zombiekitten.0.stl", type="zombiekitten", variant=0)
     g.players[other].hand = [secret_steal]
     g.play_combo(first, "pair", [c1.id, c2.id])
@@ -1244,7 +1245,7 @@ def test_fx_events_clone_combo_imploding_arm_and_favor_call():
     force_turn(g, p0)
     g.players[p1].hand = [Card(id="nope.0.cmb", type="nope", variant=0), Card(id="cat.0.trg", type="cat", variant=0)]
     c1 = give(g, p0, "cat", 0)
-    c2 = give(g, p0, "cat", 2)
+    c2 = give(g, p0, "cat", 0)
     g.play_combo(p0, "pair", [c1.id, c2.id])
     g.stack_nope(p1)
     g.pass_nope(p0)
