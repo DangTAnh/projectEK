@@ -326,8 +326,27 @@ class Room:
                 self.sessions.pop(clean, None)
                 self._disconnected_at.pop(clean, None)
                 self.avatars.pop(clean, None)
+            elif self.game is not None and self.game.phase == "playing":
+                player = self.game.players.get(clean)
+                if player is not None and not player.alive:
+                    self.game.auto_resolve_dead_pending(include_revive=True)
             return True
         return False
+
+    async def handle_disconnect(self, name: str, ws: WebSocket) -> None:
+        """Xử lý ngắt kết nối dưới lock: rời ghế, auto-resolve dead pending, đồng bộ timer và broadcast."""
+        async with self._lock:
+            if not self.leave(name, ws):
+                return
+            if self._loading is not None:
+                connected_players = [n for n in self._loading["players"] if n in self.conns]
+                if len(connected_players) < 2 or all(n in self._loading["ready"] for n in connected_players):
+                    await self._finish_loading_locked()
+                    return
+            if self.game is not None and self.game.phase == "playing":
+                self._sync_nope_timer_locked(self.game)
+                self._sync_turn_timer_locked(self.game, reset=False)
+            await self._broadcast_locked()
 
     def _require_sender(self, name: str, ws: WebSocket | None, session: str | None) -> None:
         clean = (name or "").strip()

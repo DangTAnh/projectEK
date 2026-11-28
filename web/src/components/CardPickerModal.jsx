@@ -55,7 +55,8 @@ export default function CardPickerModal({
     return candidates.filter((c) => {
       if (activeCat !== 'all' && c.category !== activeCat) return false
       if (!q) return true
-      const hay = normalizeText(`${c.name} ${c.type} ${c.category || ''} ${c.description || ''}`)
+      const variantAliases = Object.values(c.variant_names || {}).join(' ')
+      const hay = normalizeText(`${c.name} ${variantAliases} ${c.type} ${c.category || ''} ${c.description || ''}`)
       return hay.includes(q)
     })
   }, [candidates, query, activeCat])

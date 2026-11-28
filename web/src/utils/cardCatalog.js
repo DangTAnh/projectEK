@@ -131,6 +131,13 @@ const FALLBACK_NAMES = {
   feedthedead: 'Feed the Dead',
 }
 
+export const FALLBACK_VARIANT_NAMES = {
+  curseofthecatbutt: {
+    0: 'Curse of the Cat Butt',
+    1: 'Blind As A Bat',
+  },
+}
+
 export const CATEGORY_LABELS = {
   bomb: 'Bom',
   rescue: 'Cứu nguy',
@@ -158,6 +165,7 @@ function buildFallbackCatalog() {
       description: '',
       category: '',
       variants: [0],
+      ...(FALLBACK_VARIANT_NAMES[type] ? { variant_names: FALLBACK_VARIANT_NAMES[type] } : {}),
     }
   }
   return out
@@ -182,6 +190,7 @@ function mergeCatalog(remote) {
       description: '',
       category: '',
       variants: [0],
+      ...(FALLBACK_VARIANT_NAMES[type] ? { variant_names: FALLBACK_VARIANT_NAMES[type] } : {}),
     }
     merged[type] = {
       ...base,
@@ -237,8 +246,16 @@ export function getCardMeta(catalog, type) {
   }
 }
 
-export function getCardName(catalog, type) {
-  return getCardMeta(catalog, type)?.name || type || ''
+export function getCardName(catalog, typeOrCard, variant = null) {
+  const isCardObj = typeOrCard && typeof typeOrCard === 'object'
+  const type = isCardObj ? typeOrCard.type : typeOrCard
+  const resolvedVariant = variant ?? (isCardObj ? typeOrCard.variant : null)
+  const meta = getCardMeta(catalog, type)
+  if (meta?.variant_names && resolvedVariant !== null && resolvedVariant !== undefined) {
+    const vname = meta.variant_names[String(resolvedVariant)] ?? meta.variant_names[resolvedVariant]
+    if (vname) return vname
+  }
+  return meta?.name || type || ''
 }
 
 export function getCategoryLabel(category) {
@@ -260,15 +277,29 @@ export function validateCombo(cards) {
     }
   }
   const hasWild = cards.some((c) => c.type === 'feralcat' || c.type === 'clone')
-  const core = cards.map((c) => c.type).filter((t) => t !== 'feralcat' && t !== 'clone')
-  const same = new Set(core).size <= 1
-  const wildOk = !hasWild || core.length === 0 || core[0] === 'cat'
-  if (same && wildOk) {
+  const coreCards = cards.filter((c) => c.type !== 'feralcat' && c.type !== 'clone')
+  const coreTypes = coreCards.map((c) => c.type)
+  const sameType = new Set(coreTypes).size <= 1
+  const wildOk = !hasWild || coreTypes.length === 0 || coreTypes[0] === 'cat'
+  const sameCatVariant = (
+    coreTypes.length === 0
+    || coreTypes[0] !== 'cat'
+    || new Set(coreCards.map((c) => c.variant ?? 0)).size <= 1
+  )
+  if (sameType && wildOk && sameCatVariant) {
     const combo = cards.length === 2 ? 'pair' : 'three'
     const hint = combo === 'pair'
       ? 'Bộ đôi: trộm ngẫu nhiên 1 lá úp'
       : 'Bộ ba: gọi tên thẻ muốn lấy'
     return { valid: true, combo, hint, error: '' }
+  }
+  if (sameType && !sameCatVariant) {
+    return {
+      valid: false,
+      combo: null,
+      hint: '',
+      error: 'Các lá Mèo (Cat) phải cùng loại mèo (cùng hình) mới ghép combo được.',
+    }
   }
   return {
     valid: false,

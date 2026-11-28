@@ -65,7 +65,7 @@ export default function NopeBar({
   // Khi đã có người Nope (stacked > 0), chính actor cũng có thể phản-Nope (Yup) hoặc Bỏ qua
   const canAct = alive && (!isActor || stacked > 0)
   const responded = !!win.you_responded || submittedKey === windowKey
-  const cardName = win.card ? getCardName(catalog, win.card.type) : 'thẻ'
+  const cardName = win.card ? getCardName(catalog, win.card.type, win.card.variant) : 'thẻ'
   const asName = win.as_type ? getCardName(catalog, win.as_type) : ''
   const isCancelled = stacked % 2 === 1
 

@@ -24,7 +24,8 @@ def give(g, name, ctype, variant=0):
     for i, c in enumerate(g.deck.cards):
         if c.type == ctype and c.variant == variant:
             return g.players[name].hand.append(g.deck.cards.pop(i)) or g.players[name].hand[-1]
-    card = Card(id=f"{ctype}.{variant}.test", type=ctype, variant=variant)
+    g._card_seq += 1
+    card = Card(id=f"{ctype}.{variant}.test.{g._card_seq}", type=ctype, variant=variant)
     g.players[name].hand.append(card)
     return card
 
@@ -190,8 +191,8 @@ def test_three_call_does_not_yield_feral_for_action_query():
     g = make_game(2)
     first, other = g.order[0], g.order[1]
     force_turn(g, first)
-    for v in (1, 2, 3):
-        give(g, first, "cat", v)
+    for _ in range(3):
+        give(g, first, "cat", 0)
     feral = give(g, other, "feralcat")
     n_before = len(g.players[first].hand)
     g.play_combo(first, "three", hand_ids(g, first)[-3:])
@@ -261,22 +262,23 @@ def test_blind_hides_own_marked():
 # ---------- P0/P1 engine fixes & contract tests ----------
 
 
-def test_graverobber_dead_player_can_submit_card():
+def test_graverobber_dead_player_auto_picks_random_non_godcat():
     g = make_game(3)
     first, dead = g.order[0], g.order[2]
     g.players[dead].alive = False
-    dead_card = give(g, dead, "skip")
+    god = Card(id="godcat.0.gr", type="godcat", variant=0)
+    dead_card = Card(id="skip.0.gr", type="skip", variant=0)
+    g.players[dead].hand = [god, dead_card]
     give(g, first, "graverobber")
     deck_before = g.deck.size()
     act(g, first, "graverobber")
-    assert g.pending is not None
-    assert g.pending["owner"] == dead
-    assert g.pending["kind"] == "pick_card"
-    assert g.pending["data"]["source"] == "own_hand"
-    g.respond(dead, {"card_id": dead_card.id})
+    # Người chết tự động chọn ngẫu nhiên 1 thẻ hợp lệ (không phải Godcat), không mở pending treo bàn
     assert g.pending is None
     assert dead_card not in g.players[dead].hand
+    assert god in g.players[dead].hand
+    assert any(c.id == dead_card.id for c in g.deck.cards)
     assert g.deck.size() == deck_before + 1
+    assert any(dead in line and "tự động chọn ngẫu nhiên" in line for line in g.log)
 
 
 def test_digdeeper_decline_draws_second_card_and_leaves_first_on_top():
@@ -898,6 +900,31 @@ def test_blind_manual_respond_favor_and_potluck_godcat_guard():
     assert any(c.id == rv3.id for c in g3.deck.cards)
 
 
+def test_blind_play_exploding_kitten_from_hand_triggers_blind_defuse():
+    g = make_game(3)
+    first = cur(g).name
+    p = g.players[first]
+    p.blind = True
+    ek = Card(id="explodingkitten.0.hand", type="explodingkitten", variant=0)
+    sk = Card(id="streakingkitten.0.hand", type="streakingkitten", variant=0)
+    df = Card(id="defuse.0.hand", type="defuse", variant=0)
+    p.hand = [ek, sk, df]
+
+    g.play_card(first, "blind.0")
+    assert g.pending is not None
+    assert g.pending["kind"] == "pick_card"
+    assert g.pending["data"]["reason"] == "blind_defuse"
+    assert p.blind is True
+
+    # Chọn trúng defuse ở blind.1 -> cứu sống, gỡ mù và cho chèn lại bom
+    g.respond(first, {"card_id": "blind.1"})
+    assert p.alive is True and p.blind is False
+    assert g.pending["kind"] == "pick_index"
+    g.respond(first, {"index": 0})
+    assert g.pending is None
+    assert g.deck.peek(1)[0].id == ek.id
+
+
 def test_fx_events_seq_monotone_and_view_cap():
     g = make_game(2)
     first, other = g.order[0], g.order[1]
@@ -978,7 +1005,7 @@ def test_fx_events_transfers_privacy_and_put_deck():
 
     # 2. Pair steal transfer
     c1 = give(g, first, "cat", 1)
-    c2 = give(g, first, "cat", 2)
+    c2 = give(g, first, "cat", 1)
     secret_steal = Card(id="zombiekitten.0.stl", type="zombiekitten", variant=0)
     g.players[other].hand = [secret_steal]
     g.play_combo(first, "pair", [c1.id, c2.id])
@@ -1219,7 +1246,7 @@ def test_fx_events_clone_combo_imploding_arm_and_favor_call():
     force_turn(g, p0)
     g.players[p1].hand = [Card(id="nope.0.cmb", type="nope", variant=0), Card(id="cat.0.trg", type="cat", variant=0)]
     c1 = give(g, p0, "cat", 0)
-    c2 = give(g, p0, "cat", 2)
+    c2 = give(g, p0, "cat", 0)
     g.play_combo(p0, "pair", [c1.id, c2.id])
     g.stack_nope(p1)
     g.pass_nope(p0)

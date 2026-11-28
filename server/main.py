@@ -418,11 +418,10 @@ async def ws_room(ws: WebSocket, code: str, name: str = "", token: str | None = 
         # rời phòng thì báo cho người còn lại biết roster lobby đã đổi.
         # shield: socket vừa rớt có thể bị huỷ scope ngay (TestClient/tắt server);
         # để cancel xuyên qua sẽ làm broadcast dở dang, người còn lại mất state.
-        if room.leave(clean, ws):
-            try:
-                await asyncio.shield(room.push_all())
-            except Exception:
-                logger.exception("Failed to broadcast leave for %s in room %s", clean, code)
+        try:
+            await asyncio.shield(room.handle_disconnect(clean, ws))
+        except Exception:
+            logger.exception("Failed to broadcast leave for %s in room %s", clean, code)
 
 
 def run(host: str = "0.0.0.0", port: int = 8000) -> None:  # pragma: no cover

@@ -7,12 +7,12 @@ import { getCardMeta, getCardName } from '../utils/cardCatalog.js'
 const BOMB_INSERT_REASONS = new Set(['defuse', 'defuse_receive', 'zombie', 'imploding', 'godcat_defuse'])
 
 const REASON_TEXT = {
-  defuse: 'Chọn vị trí chèn Exploding Kitten (0 = đỉnh deck)',
-  defuse_receive: 'Nhận Exploding Kitten — chọn vị trí chèn lại vào deck (0 = đỉnh)',
-  zombie: 'Chèn bom lại vào deck (0 = đỉnh)',
-  imploding: 'Đặt Imploding Kitten trở lại deck (0 = đỉnh)',
-  godcat_defuse: 'Chèn bom lại vào deck (Godcat làm Defuse)',
-  bury: 'Chọn vị trí vùi lá vừa nhặt (0 = đỉnh)',
+  defuse: 'Chọn vị trí chèn Exploding Kitten (1 = đỉnh deck)',
+  defuse_receive: 'Nhận Exploding Kitten — chọn vị trí chèn lại vào deck (1 = đỉnh)',
+  zombie: 'Chèn bom lại vào deck (1 = đỉnh)',
+  imploding: 'Đặt Imploding Kitten trở lại deck (1 = đỉnh)',
+  godcat_defuse: 'Chèn bom lại vào deck (Godcat làm Defuse, 1 = đỉnh)',
+  bury: 'Chọn vị trí vùi lá vừa nhặt (1 = đỉnh)',
   favor: 'Ai phải đưa thẻ?',
   steal: 'Ăn trộm thẻ của ai?',
   call_card: 'Gọi tên thẻ của ai?',
@@ -26,6 +26,7 @@ const REASON_TEXT = {
   potluck: 'Chọn 1 thẻ đặt lên đỉnh deck (Potluck)',
   into_deck: 'Chọn 1 thẻ cài lén vào deck',
   feedthedead: 'Chọn 1 thẻ dâng cho người hồi sinh',
+  blind_defuse: 'Đang bị MÙ và rút phải bom — chọn bừa lá úp trên tay để tìm Defuse!',
 }
 
 export default function PendingPanel({
@@ -35,6 +36,7 @@ export default function PendingPanel({
   connected = true,
   overHo = false,
   isBlind = false,
+  canClairvoyance = false,
   catalog = null,
   peekCards = [],
   onInspectCard = null,
@@ -54,12 +56,20 @@ export default function PendingPanel({
     return (
       <div className="pending-panel waiting" role="status" aria-live="polite">
         <h3><RealIcon name="hourglass" size={18} /> {pending.owner} đang quyết định…</h3>
+        {canClairvoyance && (
+          <p className="handout-sub">
+            🔮 Bạn có <b>Clairvoyance</b> — bấm <b>NOW</b> trên lá Clairvoyance để nhìn lén vị trí đặt bom!
+          </p>
+        )}
       </div>
     )
   }
 
   const { kind, data = {} } = pending
   const isBombInsert = kind === 'pick_index' && BOMB_INSERT_REASONS.has(data.reason)
+  const displayMin = minVal + 1
+  const displayMax = maxVal + 1
+  const displayIdx = idx + 1
   const depthPct = maxVal > minVal ? Math.min(100, Math.max(0, ((idx - minVal) / (maxVal - minVal)) * 100)) : 0
   const respond = (payload) => {
     if (!connected) return
@@ -75,7 +85,11 @@ export default function PendingPanel({
   return (
     <div className="pending-panel" role="dialog" aria-live="polite" aria-label="Lượt quyết định của bạn">
       <div className="pend-eyebrow">
-        {kind === 'reorder' ? 'ALTER THE FUTURE' : isBombInsert ? 'DEFUSE BOMB' : 'ACTION REQUIRED'}
+        {kind === 'reorder'
+          ? 'ALTER THE FUTURE'
+          : (isBombInsert || data.reason === 'blind_defuse')
+            ? 'DEFUSE BOMB'
+            : 'ACTION REQUIRED'}
       </div>
       <h3>Đến lượt quyết định của bạn</h3>
 
@@ -100,7 +114,7 @@ export default function PendingPanel({
                 disabled={!connected}
                 onClick={() => setIdx(minVal)}
               >
-                Đỉnh ({minVal})
+                Đỉnh ({displayMin})
               </button>
               {maxVal >= minVal + 1 && (
                 <button
@@ -109,7 +123,7 @@ export default function PendingPanel({
                   disabled={!connected}
                   onClick={() => setIdx(minVal + 1)}
                 >
-                  Thứ 2 ({minVal + 1})
+                  Thứ 2 ({displayMin + 1})
                 </button>
               )}
               {maxVal >= minVal + 2 && (
@@ -119,7 +133,7 @@ export default function PendingPanel({
                   disabled={!connected}
                   onClick={() => setIdx(minVal + 2)}
                 >
-                  Thứ 3 ({minVal + 2})
+                  Thứ 3 ({displayMin + 2})
                 </button>
               )}
               {maxVal > minVal && (
@@ -142,14 +156,14 @@ export default function PendingPanel({
                   disabled={!connected}
                   onClick={() => setIdx(maxVal)}
                 >
-                  Đáy ({maxVal})
+                  Đáy ({displayMax})
                 </button>
               )}
             </div>
             <div className={`depth-meter ${isBombInsert ? 'is-bomb' : ''}`} aria-hidden="true">
               <div className="depth-labels">
-                <span>TOP ({minVal})</span>
-                <span>BOTTOM ({maxVal})</span>
+                <span>TOP ({displayMin})</span>
+                <span>BOTTOM ({displayMax})</span>
               </div>
               <div className="depth-track">
                 <div className="depth-fill" style={{ width: `${depthPct}%` }} />
@@ -168,12 +182,12 @@ export default function PendingPanel({
               />
               <b>
                 {maxVal <= minVal
-                  ? 'Deck trống — đặt ở đỉnh (0)'
-                  : idx === 0
-                    ? 'Vị trí 0 / ' + maxVal + ' (Đỉnh — rút kế tiếp!)'
+                  ? `Deck trống — đặt ở đỉnh (${displayMin})`
+                  : idx === minVal
+                    ? `Vị trí ${displayIdx} / ${displayMax} (Đỉnh — rút kế tiếp!)`
                     : idx === maxVal
-                      ? `Vị trí ${idx} / ${maxVal} (Đáy deck)`
-                      : `Vị trí ${idx} / ${maxVal} từ đỉnh`}
+                      ? `Vị trí ${displayIdx} / ${displayMax} (Đáy deck)`
+                      : `Vị trí ${displayIdx} / ${displayMax} từ đỉnh`}
               </b>
               <button
                 type="button"
@@ -202,7 +216,7 @@ export default function PendingPanel({
                 <CardView card={yesNoCard} small catalog={catalog} />
               </button>
               <div className="yesno-card-info">
-                <strong>{getCardName(catalog, yesNoCard.type)}</strong>
+                <strong>{getCardName(catalog, yesNoCard.type, yesNoCard.variant)}</strong>
                 {yesNoMeta?.description && <p className="yesno-desc">{yesNoMeta.description}</p>}
               </div>
             </div>
@@ -279,10 +293,35 @@ export default function PendingPanel({
       {kind === 'pick_card' && data.source === 'own_hand' && (
         <div className={`handout-zone ${isBlind ? 'is-blind' : ''}`}>
           <div id="handout-drop" className={`handout-drop ${overHo ? 'over' : ''}`}>
-            <img src="/handout.png" alt="" className="handout-img" draggable={false} />
+            {data.reason === 'blind_defuse' && data.card ? (
+              <button
+                type="button"
+                className="pend-card-btn"
+                title="Bấm để xem chi tiết lá bom"
+                onClick={() => onInspectCard?.(data.card)}
+              >
+                <CardView card={data.card} small catalog={catalog} />
+              </button>
+            ) : (
+              <img src="/handout.png" alt="" className="handout-img" draggable={false} />
+            )}
           </div>
           <div className="handout-text">
-            {isBlind ? (
+            {data.reason === 'blind_defuse' ? (
+              <>
+                <p className="handout-hint">
+                  <RealIcon name="bomb" size={18} /> Bạn đang bị MÙ và rút phải <b>{getCardName(catalog, data.card?.type || 'explodingkitten', data.card?.variant)}</b>! Hãy lật bừa 1 lá úp để tìm Defuse.
+                </p>
+                {data.last_wasted && (
+                  <p className="handout-sub">
+                    Vừa đánh trượt: <b>{data.last_wasted}</b> (mất hiệu lực) — hãy chọn tiếp lá úp khác!
+                  </p>
+                )}
+                <p className="handout-sub">
+                  Trúng Defuse/Zombie/Godcat sẽ cứu sống và gỡ mù · Trúng lá bỏ lượt (Skip/Super Skip/Reverse/Attack) sẽ nổ ngay · Kéo thả lá úp vào đây hoặc bấm chọn rồi bấm “Thử lật lá úp”.
+                </p>
+              </>
+            ) : isBlind ? (
               <>
                 <p className="handout-hint">
                   <RealIcon name="blind" size={18} /> Bạn đang bị mù! Hãy tự chọn hoặc kéo 1 lá úp bất kỳ
@@ -357,7 +396,7 @@ function ReorderForm({ cards, catalog, connected, onInspectCard, onDone }) {
         {order.map((id, i) => {
           const c = cards.find((x) => x.id === id)
           if (!c) return null
-          const cardName = getCardName(catalog, c.type)
+          const cardName = getCardName(catalog, c.type, c.variant)
           const isBomb = isBombCard(c)
           return (
             <React.Fragment key={id}>

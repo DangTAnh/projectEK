@@ -2,11 +2,12 @@ import React from 'react'
 import { createPortal } from 'react-dom'
 import CardView from './CardView.jsx'
 import RealIcon from './RealIcon.jsx'
-import { getCardMeta, getCategoryLabel } from '../utils/cardCatalog.js'
+import { getCardMeta, getCardName, getCategoryLabel } from '../utils/cardCatalog.js'
 
 export default function ZoomModal({ card, catalog, onClose }) {
   if (!card) return null
   const meta = getCardMeta(catalog, card.type)
+  const displayName = getCardName(catalog, card.type, card.variant)
   const catLabel = getCategoryLabel(meta?.category)
 
   return createPortal(
@@ -14,7 +15,7 @@ export default function ZoomModal({ card, catalog, onClose }) {
       className="zoom-overlay"
       role="dialog"
       aria-modal="true"
-      aria-label={`Chi tiết thẻ ${meta?.name || card.type}`}
+      aria-label={`Chi tiết thẻ ${displayName}`}
       onClick={onClose}
     >
       <div className="zoom-dialog" onClick={(e) => e.stopPropagation()}>
@@ -32,7 +33,7 @@ export default function ZoomModal({ card, catalog, onClose }) {
         <div className="zoom-meta">
           <div className="zoom-meta-top">
             <span className="zoom-eyebrow">Chi tiết lá bài</span>
-            <h3>{meta?.name || card.type}</h3>
+            <h3>{displayName}</h3>
             <div className="zoom-tags">
               {catLabel && <span className="zoom-tag cat">{catLabel}</span>}
               {meta?.anytime && (

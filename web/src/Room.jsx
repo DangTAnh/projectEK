@@ -574,7 +574,12 @@ export default function Room({ code }) {
                 const ev = latestTransfer
                 const fxKey = `${ev.seq}-${Date.now()}`
                 let deckAnchor = null
-                if (ev.kind === 'draw' || ev.kind === 'put_deck') {
+                const isMyIlltakeGive = (
+                  ev.kind === 'transfer'
+                  && ev.card_type === 'illtakethat'
+                  && ev.actor === name
+                )
+                if (ev.kind === 'draw' || ev.kind === 'put_deck' || isMyIlltakeGive) {
                   const tRect = tableRef.current?.getBoundingClientRect()
                   const dRect = deckRef.current?.getBoundingClientRect()
                   if (tRect && dRect && tRect.width > 0 && dRect.width > 0) {
@@ -596,12 +601,22 @@ export default function Room({ code }) {
                     deckAnchor,
                   }
                 } else if (ev.kind === 'transfer') {
+                  const revealedCard = (
+                    isMyIlltakeGive
+                    && nextView.you?.peek_meta?.source === 'illtakethat'
+                    && Array.isArray(nextView.you?.peek)
+                  )
+                    ? nextView.you.peek[0] || null
+                    : null
                   nextTransfer = {
                     key: fxKey,
                     mode: ev.actor === name ? 'give_out' : ev.target === name ? 'receive_in' : 'transfer_other',
                     reason: ev.card_type,
+                    source: ev.source || 'top',
                     actor: ev.actor,
                     target: ev.target,
+                    card: revealedCard,
+                    deckAnchor: isMyIlltakeGive ? deckAnchor : null,
                   }
                 } else if (ev.kind === 'put_deck') {
                   nextTransfer = {
@@ -727,7 +742,8 @@ export default function Room({ code }) {
   const me = view?.you || null
   const hand = me?.hand
   const lastPeekSigRef = useRef('')
-  const peekSig = (me?.peek || []).map((c, idx) => c?.id || `${c?.type || 'x'}-${idx}`).join('|')
+  const peekCardsSig = (me?.peek || []).map((c, idx) => c?.id || `${c?.type || 'x'}-${idx}`).join('|')
+  const peekSig = peekCardsSig ? `${me?.peek_meta?.seq ?? ''}:${peekCardsSig}` : ''
   useEffect(() => {
     if (peekSig && peekSig !== lastPeekSigRef.current) {
       lastPeekSigRef.current = peekSig
@@ -1021,10 +1037,14 @@ export default function Room({ code }) {
   )
   const comboCheck = useMemo(() => validateCombo(me?.blind ? [] : selectedCardList), [me?.blind, selectedCardList])
 
+  const canClairvoyance = Boolean(me?.can_clairvoyance)
+  const hasClairvoyanceInHand = !me?.blind && (me?.hand || []).some((c) => c.type === 'clairvoyance')
+
   const canPlay = useCallback((card) => (
     connected && isMyTurn && !view?.pending && !view?.nope_window
       && card.type !== 'nope' && !UNPLAYABLE_TYPES.includes(card.type)
-  ), [connected, isMyTurn, view?.pending, view?.nope_window])
+      && (card.type !== 'clairvoyance' || canClairvoyance)
+  ), [connected, isMyTurn, view?.pending, view?.nope_window, canClairvoyance])
 
   const playOne = useCallback((card, forceNow = false) => {
     if (!connected) {
@@ -1253,7 +1273,7 @@ export default function Room({ code }) {
   }
 
   function toggleSelect(id) {
-    if (!me?.alive && !(givePending && myPending?.data?.reason === 'into_deck')) return
+    if (!me?.alive) return
     if (me?.blind) {
       setSelected((sel) => (sel.includes(id) ? [] : [id]))
       return
@@ -1265,13 +1285,16 @@ export default function Room({ code }) {
     if (!connected) return false
     if (givePending) return false
     if (me.blind) return canDraw
+    if (card.type === 'clairvoyance') {
+      return canClairvoyance && !view.nope_window
+    }
     return canPlay(card)
       || (me.alive && ANYTIME_TYPES.includes(card.type) && !view.nope_window && !view.pending)
   }
 
   function startDrag(e, card) {
     if (e.button !== 0 || drag) return
-    const giveMode = !!givePending && (me.alive || myPending?.data?.reason === 'into_deck')
+    const giveMode = !!givePending && !!me.alive
     const blindMode = !!me.blind
     const allowTablePlay = !giveMode && canPlayToTable(card)
     if (!me.alive && !giveMode && !allowTablePlay) return
@@ -1402,7 +1425,11 @@ export default function Room({ code }) {
   const isOracleOpen = Boolean((me.peek?.length > 0 && peekOpen) || (myPending && view.pending?.kind === 'reorder'))
   const isUnderAttack = Boolean(isMyTurn && turnsLeft > 1)
 
-  const isDeadLocked = !me.alive && !(givePending && myPending?.data?.reason === 'into_deck')
+  const hasDeadAnytime = !me.alive && !me.blind && (me.hand || []).some(
+    (c) => (c.type === 'clairvoyance' && canClairvoyance && !view.nope_window)
+      || (c.type === 'feedthedead' && !view.pending && !view.nope_window),
+  )
+  const isDeadLocked = !me.alive && !hasDeadAnytime
 
   return (
     <div className={`room ${shake ? 'shake' : ''}`}>
@@ -1717,7 +1744,7 @@ export default function Room({ code }) {
                   key={e.card.id}
                   type="button"
                   className={`playmat-card-btn fx-${e.card.type}`}
-                  title={`Xem chi tiết ${getCardName(catalog, e.card.type)}`}
+                  title={`Xem chi tiết ${getCardName(catalog, e.card.type, e.card.variant)}`}
                   onClick={() => setZoom(e.card)}
                 >
                   <CardView small card={e.card} label={e.name !== '-' ? e.name : ''} catalog={catalog} />
@@ -1809,12 +1836,13 @@ export default function Room({ code }) {
           )}
           <FutureVisionPanel
             cards={me.peek}
+            peekMeta={me.peek_meta}
             open={peekOpen}
             onToggle={() => setPeekOpen((o) => !o)}
             catalog={catalog}
             onInspectCard={setZoom}
           />
-          <CardTransferFx fx={transferFx} />
+          <CardTransferFx fx={transferFx} catalog={catalog} />
           <ActionCutscene fx={actionFx} />
         </div>
 
@@ -1839,6 +1867,7 @@ export default function Room({ code }) {
         connected={connected}
         overHo={!!drag?.overHo}
         isBlind={!!me.blind}
+        canClairvoyance={canClairvoyance && hasClairvoyanceInHand}
         catalog={catalog}
         peekCards={me.peek}
         onInspectCard={setZoom}
@@ -1857,9 +1886,11 @@ export default function Room({ code }) {
                 setSelected([])
               }}
             >
-              {me.blind
-                ? `Đưa lá úp #${(selectedCardList[0].blind_index ?? 0) + 1}`
-                : `Đưa lá đã chọn (${getCardName(catalog, selectedCardList[0].type)})`}
+              {myPending?.data?.reason === 'blind_defuse'
+                ? `Thử lật lá úp #${(selectedCardList[0].blind_index ?? 0) + 1}`
+                : me.blind
+                  ? `Đưa lá úp #${(selectedCardList[0].blind_index ?? 0) + 1}`
+                  : `Đưa lá đã chọn (${getCardName(catalog, selectedCardList[0].type, selectedCardList[0].variant)})`}
             </button>
             <button type="button" onClick={() => setSelected([])}>Bỏ chọn</button>
           </div>
@@ -1899,7 +1930,7 @@ export default function Room({ code }) {
               onClick={tryPlaySelected}
             >
               {selectedCardList.length === 1
-                ? `Đánh ${getCardName(catalog, selectedCardList[0].type)}`
+                ? `Đánh ${getCardName(catalog, selectedCardList[0].type, selectedCardList[0].variant)}`
                 : comboCheck.valid
                   ? `Đánh combo ${selectedCardList.length} lá`
                   : selectedCardList.length > 3
@@ -1943,7 +1974,7 @@ export default function Room({ code }) {
             )}
             {me.marked && (
               <span className="hand-status-badge mark-badge">
-                <RealIcon name="pin" size={15} /> Bị Mark: {getCardName(catalog, me.marked.type)}
+                <RealIcon name="pin" size={15} /> Bị Mark: {getCardName(catalog, me.marked.type, me.marked.variant)}
               </span>
             )}
           </div>
@@ -2036,12 +2067,14 @@ export default function Room({ code }) {
                 : (n > 12 ? 0.6 : n > 9 ? 1.0 : n > 6 ? 1.5 : 2.1)
               const isSelected = selected.includes(c.id)
               const playableNow = canPlay(c)
-              const anytimeOffTurn = connected && !isMyTurn
-                && (me.alive || c.type === 'clairvoyance' || c.type === 'feedthedead')
-                && ANYTIME_TYPES.includes(c.type) && !view.nope_window && !view.pending
+              const anytimeOffTurn = connected && !view.nope_window && (
+                c.type === 'clairvoyance'
+                  ? (canClairvoyance && !playableNow)
+                  : (!isMyTurn && !view.pending && (me.alive || c.type === 'feedthedead') && ANYTIME_TYPES.includes(c.type))
+              )
               const isMarkedCard = me.marked?.id === c.id
               const dimOnTurn = canDraw && !playableNow && !isSelected && selected.length === 0
-              const cardName = getCardName(catalog, c.type)
+              const cardName = getCardName(catalog, c.type, c.variant)
 
   return (
                 <div
@@ -2172,7 +2205,7 @@ export default function Room({ code }) {
                   onClick={() => setZoom(c)}
                 >
                   <CardView small card={c} catalog={catalog} />
-                  <span>#{view.grave.length - i} · {getCardName(catalog, c.type)}</span>
+                  <span>#{view.grave.length - i} · {getCardName(catalog, c.type, c.variant)}</span>
                 </button>
               ))}
             </div>

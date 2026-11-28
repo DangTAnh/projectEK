@@ -8,7 +8,7 @@ Room đẩy respond() -> cont(payload) -> có thể _ask tiếp (chuỗi quyết
 import copy
 import random
 
-from .cards import CARD_META, GODCAT_BANNED, RESCUE_ORDER, Card
+from .cards import CARD_META, GODCAT_BANNED, RESCUE_ORDER, Card, card_display_name
 from .deck import Deck
 from .player import Player
 
@@ -18,6 +18,11 @@ TURN_ENDING_TYPES = {
     "attackofthedead", "drawfromthebottom", "digdeeper", "raisingheck",
     "bury", "catomicbomb", "armageddon",
 }
+BLIND_BOMB_FATAL_TYPES = {
+    "skip", "superskip", "reverse",
+    "attack2x", "targetattack2x", "personalattack3x", "attackofthedead",
+}
+CLAIRVOYANCE_INSERT_REASONS = {"defuse", "defuse_receive", "zombie", "godcat_defuse"}
 LOG_BUFFER_MAX = 300
 
 
@@ -47,7 +52,11 @@ class Game:
         self.nope_deadline: float | None = None  # Room gán epoch seconds
         self.revealed: list[Card] = []
         self.private_peeks: dict[str, list[dict]] = {}  # name -> cards chỉ người đó thấy
-        self.bomb_watchers: set[str] = set()  # clairvoyance: thấy vị trí bomb trong deck
+        self.private_peek_meta: dict[str, dict] = {}  # name -> {seq, source, from}
+        self._peek_seq = 0
+        self.clairvoyance_targets: dict[str, set[str]] = {}  # watcher -> bomb card IDs đã soi
+        self._pending_clairvoyance: set[str] = set()  # watcher đang soi lượt đặt bom hiện tại
+        self._last_bomb_insert: dict | None = None  # {placer, bomb_id, label} vừa đặt gần nhất
         self.log: list[str] = []  # tương thích: chỉ dòng công khai
         self.private_log: dict[str, list[str]] = {}  # name -> dòng log chỉ người đó thấy
         self.log_entries: list[tuple[int, str, str | None]] = []  # (seq, text, viewer)
@@ -133,17 +142,99 @@ class Game:
         p.hand.remove(card)
         if p.marked_id == card.id:
             p.marked_id = None
-        # Streaking Kitten rời tay (trộm/combo/favor/potluck/...): EK trên tay nổ
-        if card.type == "streakingkitten" and self.phase == "playing":
+        # Streaking Kitten rời tay (trộm/combo/favor/potluck/...): EK trên tay nổ (chỉ khi còn sống)
+        if card.type == "streakingkitten" and self.phase == "playing" and p.alive:
             carried = next((c for c in p.hand if c.type == "explodingkitten"), None)
             if carried is not None:
                 self._leave_hand(p, carried)
                 self._say(f"💥 {p.name} mất Streaking Kitten — Exploding Kitten trên tay nổ!")
                 self._handle_bomb(p, carried, remaining=1, end_after=False)
 
-    def _peek_for(self, name: str, cards: list[Card]) -> None:
+    def _peek_for(
+        self,
+        name: str,
+        cards: list[Card],
+        *,
+        source: str = "peek",
+        shared_by: str | None = None,
+    ) -> None:
         if cards:
+            self._peek_seq += 1
             self.private_peeks[name] = [c.to_dict() for c in cards]
+            meta: dict = {"seq": self._peek_seq, "source": source}
+            if shared_by is not None:
+                meta["from"] = shared_by
+            self.private_peek_meta[name] = meta
+
+    def _shuffle_deck(self) -> None:
+        self.deck.shuffle()
+        self.clairvoyance_targets.clear()
+        self._last_bomb_insert = None
+
+    def _is_clairvoyance_pending_for(self, name: str) -> bool:
+        """True khi người chơi KHÁC đang ở bước pick_index đặt bom sau Defuse/Zombie Kitten."""
+        if self.pending is None or self.pending.get("kind") != "pick_index":
+            return False
+        reason = (self.pending.get("data") or {}).get("reason")
+        if reason not in CLAIRVOYANCE_INSERT_REASONS:
+            return False
+        return self.pending.get("owner") != name
+
+    def _can_play_clairvoyance(self, name: str) -> bool:
+        """Clairvoyance chỉ dùng khi người khác đang đặt bom sau Defuse/Zombie Kitten hoặc vừa đặt xong."""
+        if self.phase != "playing" or self.nope is not None:
+            return False
+        if self._is_clairvoyance_pending_for(name):
+            return name not in self._pending_clairvoyance
+        if self.pending is not None:
+            return False
+        last = self._last_bomb_insert
+        if not last or last.get("placer") == name:
+            return False
+        bomb_id = last.get("bomb_id")
+        if not bomb_id or not any(c.id == bomb_id for c in self.deck.cards):
+            return False
+        return bomb_id not in self.clairvoyance_targets.get(name, set())
+
+    def _apply_clairvoyance(self, actor: Player) -> None:
+        self._emit_fx("card_fx", actor=actor.name, card_type="clairvoyance")
+        if self._is_clairvoyance_pending_for(actor.name):
+            owner = self.pending["owner"]
+            self._pending_clairvoyance.add(actor.name)
+            self._say(f"🔮 {actor.name} dùng Clairvoyance — đang nhìn lén vị trí {owner} đặt bom vào deck!")
+            return
+        last = self._last_bomb_insert
+        if last and last.get("placer") != actor.name:
+            bomb_id = last["bomb_id"]
+            pos = self._bomb_position_by_id(bomb_id)
+            if pos is not None:
+                self.clairvoyance_targets.setdefault(actor.name, set()).add(bomb_id)
+                self._say(f"🔮 {actor.name} dùng Clairvoyance — soi vị trí {last['placer']} vừa đặt bom!")
+                self._say(
+                    f"🔮 Clairvoyance: {last['placer']} đã đặt {last['label']} — hiện ở vị trí #{pos} từ đỉnh deck!",
+                    private=actor.name,
+                )
+                return
+        self._say(f"🔮 {actor.name} dùng Clairvoyance nhưng không còn bom vừa đặt để soi.")
+
+    def _record_bomb_insert(self, placer: str, bomb: Card, index: int) -> None:
+        """Ghi nhận lượt chèn bom sau Defuse/Zombie Kitten & thông báo cho các watcher Clairvoyance."""
+        label = CARD_META[bomb.type]["name"]
+        pos = index + 1  # 1-based từ đỉnh deck (#1 = lá kế tiếp)
+        self._say(f"{placer} đã bí mật đặt lại {label} vào deck.")
+        self._say(f"Bạn đã đặt {label} vào vị trí #{pos} từ đỉnh deck.", private=placer)
+        if bomb.type == "explodingkitten":
+            self._last_bomb_insert = {"placer": placer, "bomb_id": bomb.id, "label": label}
+            watchers = sorted(w for w in self._pending_clairvoyance if w != placer)
+            self._pending_clairvoyance.clear()
+            for watcher in watchers:
+                self.clairvoyance_targets.setdefault(watcher, set()).add(bomb.id)
+                self._say(
+                    f"🔮 Clairvoyance: {placer} vừa đặt {label} vào vị trí #{pos} từ đỉnh deck!",
+                    private=watcher,
+                )
+        else:
+            self._pending_clairvoyance.clear()
 
     def _check_win(self) -> bool:
         alives = self.alive()
@@ -153,14 +244,20 @@ class Game:
             self.pending = None
             self._cont = None
             self.nope = None
+            self._clear_transient()
             if self.winner:
                 self._say(f"🎉 {self.winner} thắng ván này!")
             return True
         return False
 
-    def _clear_transient(self) -> None:
+    def _clear_transient(self, actor: str | None = None) -> None:
         self.revealed = []
-        self.private_peeks = {}
+        if actor is None:
+            self.private_peeks = {}
+            self.private_peek_meta = {}
+        else:
+            self.private_peeks.pop(actor, None)
+            self.private_peek_meta.pop(actor, None)
 
     def _ask(self, kind: str, owner: str, data: dict, cont) -> None:
         self.pending = {"kind": kind, "owner": owner, "data": data}
@@ -176,8 +273,8 @@ class Game:
 
     def _next_alive(self, p: Player) -> Player | None:
         n = len(self.order)
-        idx = self.turn_index
-        for _ in range(n):
+        idx = self.order.index(p.name) if p.name in self.order else self.turn_index
+        for _ in range(n - 1):
             idx = (idx + self.direction) % n
             cand = self.players[self.order[idx]]
             if cand.alive:
@@ -230,6 +327,26 @@ class Game:
 
     def _receive_bomb(self, p: Player, bomb: Card, start: int = 0) -> None:
         label = CARD_META[bomb.type]["name"]
+        if p.blind and start == 0:
+            if p.standby_defuse:
+                used = self._consume_defuse(p)
+                p.blind = False
+                self._emit_fx("defuse", actor=p.name, card_type="defuse")
+                self._say(f"{p.name} dùng {used} cho {label} nhận được và hết mù!")
+                self._ask(
+                    "pick_index", p.name,
+                    {"reason": "defuse_receive", "min": 0, "max": self.deck.size(), "card": bomb.to_dict()},
+                    lambda r, pl=p, b=bomb: self._finish_receive_insert(pl, b, r),
+                )
+                return
+            if (bomb.type == "explodingkitten"
+                    and p.has_type("streakingkitten")
+                    and not p.has_type("explodingkitten")):
+                self._streaking_keep_received(p, bomb)
+                return
+            self._say(f"💥 {p.name} (bị mù) nhận phải {label} — phải đánh bừa bài trên tay để tìm Defuse!")
+            self._ask_blind_bomb_pick(p, [bomb], remaining=0, end_after=False)
+            return
         for i in range(start, len(RESCUE_ORDER)):
             t = RESCUE_ORDER[i]
             has_rescue = self._has_defuse(p) if t == "defuse" else p.has_type(t)
@@ -293,7 +410,7 @@ class Game:
         index = max(0, min(int(resp.get("index", 0)), self.deck.size()))
         self.deck.insert(bomb, index)
         self._emit_fx("put_deck", actor=p.name, card_type=bomb.type)
-        self._say(f"{CARD_META[bomb.type]['name']} chèn vào vị trí {index} từ đỉnh.")
+        self._record_bomb_insert(p.name, bomb, index)
 
     def _defuse_or_die(self, target: Player) -> None:
         used = self._consume_defuse(target)
@@ -403,9 +520,11 @@ class Game:
         qb = set(bigrams(q))
         best, best_score = None, 0.0
         for ctype in CARD_META:
-            # thưởng khớp tên hiển thị hoặc type (strip số/nối chữ)
-            name = CARD_META[ctype].get("name", ctype).lower()
-            for cand in (ctype.lower(), name):
+            # thưởng khớp tên hiển thị, tên biến thể (vd: Blind As A Bat) hoặc type
+            meta = CARD_META[ctype]
+            name = meta.get("name", ctype).lower()
+            vnames = [v.lower() for v in (meta.get("variant_names") or {}).values()]
+            for cand in (ctype.lower(), name, *vnames):
                 cb = set(bigrams(cand))
                 inter = len(qb & cb)
                 if not inter:
@@ -543,7 +662,7 @@ class Game:
     def _waste_blind_card(self, p: Player, card: Card) -> None:
         self._leave_hand(p, card)
         self._to_grave(card)
-        self._say(f"{p.name} (bị mù) tự đánh nhầm {CARD_META[card.type]['name']} và vứt vào graveyard!")
+        self._say(f"{p.name} (bị mù) tự đánh nhầm {card_display_name(card)} và vứt vào graveyard!")
 
     def _resolve_blind_card(self, p: Player, card_id: str | None) -> Card:
         self._require(bool(p.hand), "Bạn không còn thẻ nào")
@@ -558,7 +677,7 @@ class Game:
         raise GameError("Lá bài úp không hợp lệ")
 
     def play_card(self, name: str, card_id: str | None = "", as_type: str | None = None) -> None:
-        self._clear_transient()
+        self._clear_transient(actor=name)
         self._require(self.phase == "playing", "Ván chưa/không diễn ra")
         self._require(self.pending is None, "Đang chờ quyết định")
         self._require(self.nope is None, "Đang có cửa sổ Nope")
@@ -577,6 +696,11 @@ class Game:
             self._require(card is not None, "Không có thẻ này trên tay")
         meta = self._meta(card.type)
         if p.blind:
+            if card.type == "explodingkitten":
+                self._leave_hand(p, card)
+                self._say(f"💥 {name} (bị mù) tự đánh trúng Exploding Kitten trên tay — phải tìm Defuse!")
+                self._handle_bomb(p, card, remaining=1, end_after=False, allow_streaking=False)
+                return
             mat_types = {e["card"]["type"] for e in self.playmat}
             has_dead = any(not self.players[n2].alive for n2 in self.order)
             unplayable_blind = (
@@ -587,6 +711,7 @@ class Game:
                 or (meta.get("needs_dead") and not has_dead)
                 or (meta.get("needs_playmat_kitten") and not ({"godcat", "devilcat"} <= mat_types))
                 or (card.type == "bury" and p.illtake_by is not None)
+                or (card.type == "clairvoyance" and not self._can_play_clairvoyance(p.name))
             )
             if unplayable_blind:
                 self._waste_blind_card(p, card)
@@ -609,6 +734,11 @@ class Game:
         if eff_type == "bury":
             self._require(p.illtake_by is None,
                           "Bạn đang bị I'll Take That — không dùng được Bury.")
+        if eff_type == "clairvoyance":
+            self._require(
+                self._can_play_clairvoyance(name),
+                "Clairvoyance chỉ dùng khi người khác vừa Defuse/Zombie Kitten đặt bom lại vào deck",
+            )
 
         # combo cat pair (đánh đơn lá mèo không được — dùng play_combo)
         self._require(not meta.get("combo_only"), "Mèo phải đánh theo cặp/bộ ba (combo)")
@@ -643,7 +773,7 @@ class Game:
 
     def play_combo(self, name: str, combo: str, card_ids: list) -> None:
         """Combo: pair (2 lá cùng tên) hoặc three (3 lá cùng tên) — feralcat là wildcard."""
-        self._clear_transient()
+        self._clear_transient(actor=name)
         self._require(self.phase == "playing", "Ván chưa/không diễn ra")
         self._require(self.pending is None, "Đang chờ quyết định")
         self._require(self.nope is None, "Đang có cửa sổ Nope")
@@ -659,9 +789,15 @@ class Game:
             card = p.find(cid)
             self._require(card is not None, f"Không có thẻ {cid}")
             cards.append(card)
-        core_types = [c.type for c in cards if c.type not in ("feralcat", "clone")]
+        core_cards = [c for c in cards if c.type not in ("feralcat", "clone")]
+        core_types = [c.type for c in core_cards]
         if core_types:
             self._require(len(set(core_types)) == 1, "Các lá không cùng loại")
+            if core_types[0] == "cat":
+                self._require(
+                    len({c.variant for c in core_cards}) == 1,
+                    "Các lá Mèo (Cat) phải cùng loại mèo (cùng hình) mới ghép combo được",
+                )
             # Feral Cat / Clone chỉ thay thế lá Cat, không dùng cho Shuffle/Attack/...
             if any(c.type in ("feralcat", "clone") for c in cards):
                 self._require(core_types[0] == "cat", "Feral Cat/Clone chỉ thay thế lá Cat")
@@ -744,7 +880,7 @@ class Game:
         self._say(f"{target.name} đưa {p.name} 1 thẻ.")
 
     def draw(self, name: str) -> None:
-        self._clear_transient()
+        self._clear_transient(actor=name)
         self._require(self.phase == "playing", "Ván chưa/không diễn ra")
         self._require(self.pending is None, "Đang chờ quyết định")
         self._require(self.nope is None, "Đang có cửa sổ Nope")
@@ -755,9 +891,8 @@ class Game:
 
     def play_now(self, name: str, card_id: str, as_type: str | None = None) -> None:
         """Thẻ anytime: shufflenow, clairvoyance, alter3xnow, feedthedead, godcat-as-card."""
-        self._clear_transient()
+        self._clear_transient(actor=name)
         self._require(self.phase == "playing", "Ván chưa/không diễn ra")
-        self._require(self.pending is None, "Đang chờ quyết định")
         self._require(self.nope is None, "Đang có cửa sổ Nope")
         p = self._get(name)
         card = p.find(card_id)
@@ -771,6 +906,13 @@ class Game:
 
         if meta.get("as_any_card"):
             eff_type, eff_meta = self._resolve_godcat(as_type)
+            if eff_type == "clairvoyance":
+                self._require(
+                    self._can_play_clairvoyance(name),
+                    "Clairvoyance chỉ dùng khi người khác vừa Defuse/Zombie Kitten đặt bom lại vào deck",
+                )
+            else:
+                self._require(self.pending is None, "Đang chờ quyết định")
             if eff_meta.get("needs_dead"):
                 self._require(any(not self.players[n2].alive for n2 in self.order),
                               "Cần có người đã chết")
@@ -798,6 +940,13 @@ class Game:
             effect = self._make_card_effect(p, card, eff_type, clone_beneath)
             meta = eff_meta
         else:
+            if card.type == "clairvoyance":
+                self._require(
+                    self._can_play_clairvoyance(name),
+                    "Clairvoyance chỉ dùng khi người khác vừa Defuse/Zombie Kitten đặt bom lại vào deck",
+                )
+            else:
+                self._require(self.pending is None, "Đang chờ quyết định")
             self._leave_hand(p, card)
             self._to_grave(card)
             self._say(f"{name} chơi {meta['name']} (ngoài lượt)!")
@@ -946,8 +1095,9 @@ class Game:
             self._require(has_hand or has_crown, "Người này không còn gì để lấy")
 
     def respond(self, name: str, payload: dict) -> None:
-        self._clear_transient()
+        self._clear_transient(actor=name)
         self._require(self.phase == "playing", "Ván chưa/không diễn ra")
+        self._require(self.nope is None, "Đang có cửa sổ Nope")
         self._require(self.pending is not None, "Không có quyết định đang chờ")
         self._require(self.pending["owner"] == name, "Không phải lượt quyết định của bạn")
         self._require(isinstance(payload, dict), "Payload quyết định không hợp lệ")
@@ -978,8 +1128,77 @@ class Game:
             self.pending, self._cont = snap, cont  # payload hỏng không được xóa pending
             raise GameError("Payload quyết định không hợp lệ") from exc
 
+    def auto_resolve_dead_pending(self, *, include_revive: bool = False) -> bool:
+        """Tự động chọn ngẫu nhiên nếu pending hiện tại rơi vào người đã chết để tránh treo bàn."""
+        resolved_any = False
+        for _ in range(16):
+            if self.phase != "playing" or self.pending is None or self.nope is not None:
+                break
+            owner_name = self.pending.get("owner")
+            owner = self.players.get(owner_name or "")
+            if owner is None or owner.alive:
+                break
+            kind = self.pending.get("kind")
+            data = self.pending.get("data") or {}
+            if not include_revive and kind == "pick_player" and data.get("reason") == "revive":
+                break
+            payload: dict | None = None
+            if kind == "pick_card":
+                source = data.get("source")
+                if source == "own_hand":
+                    reason = data.get("reason")
+                    pool = (
+                        [c for c in owner.hand if c.type != "godcat"]
+                        if reason in ("potluck", "into_deck")
+                        else list(owner.hand)
+                    )
+                    if not pool:
+                        self.pending = None
+                        self._cont = None
+                        resolved_any = True
+                        break
+                    chosen = random.choice(pool)
+                    cid = f"blind.{owner.hand.index(chosen)}" if owner.blind else chosen.id
+                    payload = {"card_id": cid}
+                elif source == "victim_hand":
+                    cnt = int(data.get("count", 0) or 0)
+                    if cnt <= 0:
+                        self.pending = None
+                        self._cont = None
+                        resolved_any = True
+                        break
+                    payload = {"position": random.randrange(cnt)}
+            elif kind == "pick_player":
+                cands = list(data.get("candidates") or [])
+                if not cands:
+                    self.pending = None
+                    self._cont = None
+                    resolved_any = True
+                    break
+                payload = {"player": random.choice(cands)}
+            elif kind == "pick_index":
+                lo = int(data.get("min", 0))
+                hi = int(data.get("max", lo))
+                payload = {"index": random.randint(lo, max(lo, hi))}
+            elif kind == "yes_no":
+                payload = {"value": False}
+            elif kind == "reorder":
+                cards = data.get("cards") or []
+                payload = {"order": [c["id"] for c in cards if isinstance(c, dict) and "id" in c]}
+            elif kind == "input_card":
+                payload = {"text": ""}
+            if payload is None:
+                break
+            self._say(f"🪦 {owner.name} (đã chết) — hệ thống tự động chọn ngẫu nhiên để tiếp tục ván đấu.")
+            try:
+                self.respond(owner.name, payload)
+                resolved_any = True
+            except GameError:
+                break
+        return resolved_any
+
     def stack_nope(self, name: str) -> None:
-        self._clear_transient()
+        self._clear_transient(actor=name)
         self._require(self.nope is not None, "Không có cửa sổ Nope")
         self._require(self.phase == "playing", "Ván đã kết thúc")
         if not self.nope["stack"]:
@@ -1015,12 +1234,12 @@ class Game:
 
     def resolve_nope(self) -> None:
         """Đóng cửa sổ nope: số Nope lẻ => hành động bị hủy; chẵn => hiệu ứng chạy."""
-        self._clear_transient()
         self._require(self.nope is not None, "Không có cửa sổ Nope")
-        noped = len(self.nope["stack"]) % 2 == 1
         actor_name, card, stack, effect = (
             self.nope["actor"], self.nope["card"], self.nope["stack"], self.nope["effect"])
-        label = CARD_META.get(card.type, {}).get("name", card.type)
+        self._clear_transient(actor=actor_name)
+        noped = len(stack) % 2 == 1
+        label = card_display_name(card)
         self.nope = None
         self.nope_deadline = None
         for c in stack:
@@ -1066,7 +1285,7 @@ class Game:
         recyclable_ids = {c.id for c in recyclable}
         self.deck.cards = recyclable
         self.grave = [c for c in self.grave if c.id not in recyclable_ids]
-        self.deck.shuffle()
+        self._shuffle_deck()
         self._say("Deck cạn — xáo graveyard thành deck mới.")
         return True
 
@@ -1090,7 +1309,17 @@ class Game:
             p.illtake_by = None
             if actor and actor.alive and actor is not p:
                 if card.type == "explodingkitten":
-                    self._emit_fx("transfer", actor=p.name, target=actor.name, card_type="illtakethat")
+                    # illtakethat.txt: người rút xem lá trước khi đưa đi và hết mù (kể cả khi đưa EK)
+                    p.blind = False
+                    self._peek_for(p.name, [card], source="illtakethat", shared_by=actor.name)
+                    self._say(
+                        f"Bạn rút {card_display_name(card)} và phải đưa cho {actor.name} (I'll Take That)!",
+                        private=p.name,
+                    )
+                    self._emit_fx(
+                        "transfer", actor=p.name, target=actor.name,
+                        card_type="illtakethat", source=source,
+                    )
                     self._say(f"{p.name} rút phải bom nhưng bị {actor.name} chặn lấy!")
                     self._handle_bomb(actor, card, remaining=1, end_after=False)
                     if self.phase == "playing":
@@ -1099,8 +1328,22 @@ class Game:
                         )
                     return
                 if card.type != "implodingkitten":  # ponytail: imploding không intercept
+                    p.blind = False
+                    self._peek_for(p.name, [card], source="illtakethat", shared_by=actor.name)
+                    self._say(
+                        f"Bạn rút {card_display_name(card)} và phải đưa cho {actor.name} (I'll Take That)!",
+                        private=p.name,
+                    )
                     actor.hand.append(card)
-                    self._emit_fx("transfer", actor=p.name, target=actor.name, card_type="illtakethat")
+                    if not actor.blind:
+                        self._say(
+                            f"Bạn nhận {card_display_name(card)} từ {p.name} (I'll Take That)!",
+                            private=actor.name,
+                        )
+                    self._emit_fx(
+                        "transfer", actor=p.name, target=actor.name,
+                        card_type="illtakethat", source=source,
+                    )
                     self._say(f"{p.name} rút thẻ nhưng bị {actor.name} giật mất!")
                     self._after_one_draw(p, remaining, end_after)
                     return
@@ -1118,7 +1361,7 @@ class Game:
         p.hand.append(card)
         p.blind = False  # rút thành công không nổ -> khỏi mù
         self._emit_fx("draw", actor=p.name, source=source)
-        self._say(f"Bạn rút {CARD_META[ctype]['name']}", private=p.name)
+        self._say(f"Bạn rút {card_display_name(card)}", private=p.name)
         self._after_one_draw(p, remaining, end_after)
 
     def _after_one_draw(self, p: Player, remaining: int, end_after: bool) -> None:
@@ -1147,13 +1390,33 @@ class Game:
         )
 
     def _handle_bomb(self, p: Player, bomb: Card, remaining: int, end_after: bool,
-                     start: int = 0) -> None:
+                     start: int = 0, allow_streaking: bool = True) -> None:
         label = CARD_META[bomb.type]["name"]
         # Imploding Kitten MẶT NGỬA: nổ ngay, không Defuse/Streaking/Zombie/Godcat cứu được
         if bomb.type == "implodingkitten" and bomb.faceup:
             self._say(f"😼 {p.name} rút phải Imploding Kitten MẶT NGỬA — nổ ngay, không cứu được!")
             self._kill(p, bomb=bomb)
             self._after_one_draw(p, remaining, end_after)
+            return
+        if p.blind and start == 0:
+            # Defuse dự phòng (Godcat đặt công khai trên bàn) vẫn dùng được ngay
+            if p.standby_defuse:
+                used = self._consume_defuse(p)
+                p.blind = False
+                self._emit_fx("defuse", actor=p.name, card_type="defuse")
+                self._say(f"{p.name} dùng {used} cho {label} và hết mù!")
+                self._ask_pick_insert(p, bomb, "defuse", remaining, end_after)
+                return
+            # Streaking Kitten trên tay bảo vệ thụ động cho lá Exploding Kitten đầu tiên
+            if (allow_streaking
+                    and bomb.type == "explodingkitten"
+                    and p.has_type("streakingkitten")
+                    and not p.has_type("explodingkitten")):
+                p.blind = False
+                self._streaking_keep(p, bomb, remaining, end_after)
+                return
+            self._say(f"💥 {p.name} (bị mù) bốc phải {label} — phải chọn bừa lá úp trên tay để tìm Defuse!")
+            self._ask_blind_bomb_pick(p, [bomb], remaining, end_after)
             return
         for i in range(start, len(RESCUE_ORDER)):
             t = RESCUE_ORDER[i]
@@ -1205,6 +1468,150 @@ class Game:
         self._kill(p, bomb=bomb)
         self._after_one_draw(p, remaining, end_after)
 
+    def _ask_blind_bomb_pick(
+        self,
+        p: Player,
+        bombs: list[Card],
+        remaining: int,
+        end_after: bool,
+        last_wasted: str | None = None,
+    ) -> None:
+        """Người chơi đang blind bốc phải bom: phải lật bừa từng lá úp cho tới khi trúng Defuse hoặc nổ."""
+        bomb = bombs[0]
+        rest = bombs[1:]
+        if not p.hand:
+            for extra in rest:
+                self._to_grave(extra)
+            self._say(f"💥 {p.name} (bị mù) hết bài trên tay mà chưa tìm thấy Defuse — nổ tung!")
+            self._kill(p, bomb=bomb)
+            self._after_one_draw(p, remaining, end_after)
+            return
+        data: dict = {
+            "source": "own_hand",
+            "reason": "blind_defuse",
+            "card": bomb.to_dict(),
+            "remaining_bombs": len(bombs),
+        }
+        if last_wasted:
+            data["last_wasted"] = last_wasted
+        self._ask(
+            "pick_card",
+            p.name,
+            data,
+            lambda r, pl=p, bs=list(bombs), rem=remaining, ea=end_after: self._blind_bomb_pick(
+                pl, bs, r.get("card_id", ""), rem, ea
+            ),
+        )
+
+    def _blind_bomb_pick(
+        self,
+        p: Player,
+        bombs: list[Card],
+        card_id: str,
+        remaining: int,
+        end_after: bool,
+    ) -> None:
+        bomb = bombs[0]
+        next_bombs = list(bombs[1:])
+        chosen = p.find(card_id)
+        self._require(chosen is not None, "Thẻ không có trong tay bạn")
+
+        # Gỡ khỏi tay trực tiếp (tự xử lý Streaking Kitten để không đè self.pending bằng đệ quy)
+        p.hand.remove(chosen)
+        if p.marked_id == chosen.id:
+            p.marked_id = None
+        if chosen.type == "streakingkitten":
+            carried = next((c for c in p.hand if c.type == "explodingkitten"), None)
+            if carried is not None:
+                p.hand.remove(carried)
+                if p.marked_id == carried.id:
+                    p.marked_id = None
+                next_bombs.append(carried)
+                self._say(f"💥 {p.name} (bị mù) bỏ trúng Streaking Kitten — Exploding Kitten trên tay cũng phát nổ!")
+
+        label = CARD_META[bomb.type]["name"]
+        chosen_name = card_display_name(chosen)
+
+        # 1. Trúng lá cứu bom hợp lệ (Defuse / Zombie Kitten / Godcat)
+        if chosen.type in ("defuse", "zombiekitten", "godcat"):
+            if not next_bombs:
+                p.blind = False
+            unblind_suffix = " và hết mù" if not next_bombs else ""
+            after_insert = (
+                (lambda pl, rem, ea, nb=next_bombs: self._ask_blind_bomb_pick(pl, nb, rem, ea))
+                if next_bombs
+                else None
+            )
+            if chosen.type == "defuse":
+                self._to_grave(chosen)
+                self._emit_fx("defuse", actor=p.name, card_type="defuse")
+                self._say(f"🛡️ {p.name} (bị mù) đánh trúng Defuse — cứu sống khỏi {label}{unblind_suffix}!")
+                self._ask(
+                    "pick_index", p.name,
+                    {"reason": "defuse", "min": 0, "max": self.deck.size(), "card": bomb.to_dict()},
+                    lambda r, b=bomb, pl=p, rem=remaining, ea=end_after, nxt=after_insert: (
+                        self._finish_insert(pl, b, r, rem, ea, then=nxt)
+                    ),
+                )
+                return
+            if chosen.type == "zombiekitten":
+                self._to_grave(chosen)
+                self._emit_fx("defuse", actor=p.name, card_type="zombiekitten")
+                self._say(f"🧟 {p.name} (bị mù) đánh trúng Zombie Kitten — cứu sống khỏi {label}{unblind_suffix}!")
+
+                def after_zombie_insert(pl: Player, rem: int, ea: bool, nb=next_bombs) -> None:
+                    if not nb:
+                        self._zombie_revive(pl, rem, ea)
+                        return
+                    self._zombie_revive(pl, 0, False)
+                    if self.phase == "playing":
+                        self._after_quiesce(lambda: self._ask_blind_bomb_pick(pl, nb, rem, ea))
+
+                self._ask(
+                    "pick_index", p.name,
+                    {"reason": "zombie", "min": 0, "max": self.deck.size(), "card": bomb.to_dict()},
+                    lambda r, b=bomb, pl=p, rem=remaining, ea=end_after: (
+                        self._finish_insert(pl, b, r, rem, ea, then=after_zombie_insert)
+                    ),
+                )
+                return
+            # godcat
+            self.playmat.append({"name": p.name, "card": chosen.to_dict()})
+            self._emit_fx("defuse", actor=p.name, card_type="godcat")
+            self._say(f"✨ {p.name} (bị mù) đánh trúng Godcat như Defuse — cứu sống khỏi {label}{unblind_suffix}!")
+            self._ask(
+                "pick_index", p.name,
+                {"reason": "godcat_defuse", "min": 0, "max": self.deck.size(), "card": bomb.to_dict()},
+                lambda r, b=bomb, pl=p, rem=remaining, ea=end_after, nxt=after_insert: (
+                    self._finish_insert(pl, b, r, rem, ea, then=nxt)
+                ),
+            )
+            return
+
+        # 2. Trúng lá bỏ lượt (Skip, Super Skip, Reverse, Attack...) -> nổ ngay và bị loại
+        if chosen.type in BLIND_BOMB_FATAL_TYPES:
+            self._to_grave(chosen)
+            for extra in next_bombs:
+                self._to_grave(extra)
+            self._say(f"💥 {p.name} (bị mù) đánh trúng {chosen_name} (lá bỏ lượt) khi đang gỡ bom — nổ tung!")
+            self._kill(p, bomb=bomb)
+            self._after_one_draw(p, remaining, end_after)
+            return
+
+        # 3. Trúng thêm Exploding Kitten trên tay -> phải gỡ cả 2 quả bom
+        if chosen.type == "explodingkitten":
+            next_bombs.append(chosen)
+            self._say(
+                f"💥 {p.name} (bị mù) lại lật trúng {chosen_name} trên tay — phải tìm Defuse cho cả {len(next_bombs) + 1} quả bom!"
+            )
+            self._ask_blind_bomb_pick(p, [bomb, *next_bombs], remaining, end_after, last_wasted=chosen_name)
+            return
+
+        # 4. Lá khác -> bỏ vào graveyard (mất hiệu lực), tiếp tục chọn bừa
+        self._to_grave(chosen)
+        self._say(f"🙈 {p.name} (bị mù) đánh trượt trúng {chosen_name} — mất hiệu lực, tiếp tục tìm Defuse!")
+        self._ask_blind_bomb_pick(p, [bomb, *next_bombs], remaining, end_after, last_wasted=chosen_name)
+
     def _ask_pick_insert(self, p: Player, bomb: Card, reason: str,
                          remaining: int, end_after: bool) -> None:
         self._ask(
@@ -1218,7 +1625,7 @@ class Game:
         index = max(0, min(int(resp.get("index", 0)), self.deck.size()))
         self.deck.insert(bomb, index)
         self._emit_fx("put_deck", actor=p.name, card_type=bomb.type)
-        self._say(f"{CARD_META[bomb.type]['name']} chèn vào vị trí {index} từ đỉnh.")
+        self._record_bomb_insert(p.name, bomb, index)
         if then:
             then(p, remaining, end_after)
             return
@@ -1285,13 +1692,11 @@ class Game:
             self._emit_fx("card_fx", actor=p.name, card_type=t)
             self._end_turn(drew=False, force=(t == "superskip"))
         elif t == "shuffle" or t == "shufflenow":
-            self.deck.shuffle()
+            self._shuffle_deck()
             self._emit_fx("card_fx", actor=p.name, card_type=t)
             self._say("Deck được xáo.")
         elif t == "clairvoyance":
-            self.bomb_watchers.add(p.name)
-            self._emit_fx("card_fx", actor=p.name, card_type="clairvoyance")
-            self._say(f"{p.name} mở con mắt tiên tri — thấy vị trí các quả bom trong deck!")
+            self._apply_clairvoyance(p)
         elif t == "alter3xnow":
             self._emit_fx("card_fx", actor=p.name, card_type="alter3xnow")
             self._ask_reorder(p, 3, then=lambda: None)
@@ -1406,7 +1811,7 @@ class Game:
             # Người chơi đội vương miện; stash ở yên trong crown, không vào tay.
             self.tower_wearer = p.name
             self.deck.insert(card, random.randint(0, self.deck.size()))
-            self.deck.shuffle()
+            self._shuffle_deck()
             self._emit_fx("card_fx", actor=p.name, card_type="towerofpower")
             self._say(f"{p.name} đội Tower of Power — stash vẫn nằm dưới vương miện ({len(self.stash)} lá).")
         elif t == "armageddon":
@@ -1451,8 +1856,9 @@ class Game:
             if not cands:
                 self._say("Không có mục tiêu để Curse.")
                 return
+            label = card_display_name(card) if card.type == "curseofthecatbutt" else card_display_name("curseofthecatbutt")
             self._ask("pick_player", p.name, {"candidates": cands, "reason": "curse"},
-                      lambda r, pl=p: self._do_curse(pl.name, r["player"]))
+                      lambda r, pl=p, lb=label: self._do_curse(pl.name, r["player"], lb))
         elif t == "garbagecollection":
             self._emit_fx("card_fx", actor=p.name, card_type="garbagecollection")
             participants = [p.name] if any(c.type != "godcat" for c in p.hand) else []
@@ -1481,6 +1887,8 @@ class Game:
             random.shuffle(rest)
             self.revealed = list(bombs_in_deck)
             self.deck.cards = rest + bombs_in_deck  # mọi bom chồng lên đỉnh
+            self.clairvoyance_targets.clear()
+            self._last_bomb_insert = None
             self._emit_fx("card_fx", actor=p.name, card_type="catomicbomb")
             self._say(f"💣 CATOMIC BOMB! {len(bombs_in_deck)} quả bom lộ diện và xếp chồng lên đỉnh deck!")
             self._end_turn(drew=False, force=True)
@@ -1496,13 +1904,11 @@ class Game:
 
     def _apply_anytime(self, actor: Player, ctype: str) -> None:
         if ctype == "shufflenow":
-            self.deck.shuffle()
+            self._shuffle_deck()
             self._emit_fx("card_fx", actor=actor.name, card_type="shufflenow")
             self._say("Deck được xáo (NOW).")
         elif ctype == "clairvoyance":
-            self.bomb_watchers.add(actor.name)
-            self._emit_fx("card_fx", actor=actor.name, card_type="clairvoyance")
-            self._say(f"{actor.name} mở con mắt tiên tri — thấy vị trí các quả bom trong deck!")
+            self._apply_clairvoyance(actor)
         elif ctype == "alter3xnow":
             self._emit_fx("card_fx", actor=actor.name, card_type="alter3xnow")
             self._ask_reorder(actor, 3, then=lambda: None)
@@ -1728,14 +2134,14 @@ class Game:
         card = random.choice(target.hand)
         target.marked_id = card.id
         self._emit_fx("card_fx", actor=p.name, target=target.name, card_type="mark")
-        self._say(f"📌 {target.name} bị Mark: lá {CARD_META[card.type]['name']} lộ diện đến khi played/stolen!")
+        self._say(f"📌 {target.name} bị Mark: lá {card_display_name(card)} lộ diện đến khi played/stolen!")
 
-    def _do_curse(self, actor_name: str, target_name: str) -> None:
+    def _do_curse(self, actor_name: str, target_name: str, card_label: str = "Curse of the Cat Butt") -> None:
         target = self._get(target_name)
         target.blind = True
         random.shuffle(target.hand)
         self._emit_fx("card_fx", actor=actor_name, target=target_name, card_type="curseofthecatbutt")
-        self._say(f"😼 Curse of the Cat Butt: {target_name} bị MÙ — bài bị xáo úp tới khi rút thành công!")
+        self._say(f"😼 {card_label}: {target_name} bị MÙ — bài bị xáo úp tới khi rút thành công!")
 
     def _chain_into_deck(self, names: list[str], then_shuffle: bool,
                          allow_dead: bool = False) -> None:
@@ -1746,10 +2152,29 @@ class Game:
         ]
         if not names:
             if then_shuffle:
-                self.deck.shuffle()
+                self._shuffle_deck()
             return
         head, rest = names[0], names[1:]
         contributor = self.players[head]
+
+        # Người chơi đã chết: tự động chọn ngẫu nhiên 1 thẻ hợp lệ (khác Godcat) để không làm treo bàn
+        if not contributor.alive:
+            eligible = [c for c in contributor.hand if c.type != "godcat"]
+            if eligible:
+                chosen = random.choice(eligible)
+                self._leave_hand(contributor, chosen)
+                self.deck.insert(chosen, random.randint(0, self.deck.size()))
+                self._emit_fx(
+                    "put_deck",
+                    actor=contributor.name,
+                    card_type="graverobber" if allow_dead else "garbagecollection",
+                )
+                label = "Grave Robber" if allow_dead else "cài bài vào deck"
+                self._say(f"🪦 {contributor.name} (đã chết) tự động chọn ngẫu nhiên 1 thẻ cài vào deck ({label}).")
+            self._after_quiesce(
+                lambda: self._chain_into_deck(rest, then_shuffle=then_shuffle, allow_dead=allow_dead)
+            )
+            return
 
         def step(resp: dict, ct=contributor, tail=rest) -> None:
             card = ct.find(resp.get("card_id", ""))
@@ -1885,14 +2310,16 @@ class Game:
         index = max(0, min(int(resp.get("index", 0)), self.deck.size()))
         self.deck.insert(card, index)
         self._emit_fx("put_deck", actor=p.name, card_type="bury")
-        self._say(f"{p.name} vùi lặng 1 lá vào vị trí {index} từ đỉnh. Hết lượt!")
+        self._say(f"{p.name} vùi lặng 1 lá lại vào deck. Hết lượt!")
+        self._say(f"Bạn đã vùi lá vào vị trí #{index + 1} từ đỉnh deck.", private=p.name)
         self._after_one_draw(p, 1, end_after=True)
 
     def _share_show(self, p: Player) -> None:
         nxt = self._next_alive(p)
-        if nxt:
-            self._peek_for(nxt.name, self.deck.peek(3))
-            self._say(f"{p.name} chia sẻ 3 thẻ trên cùng cho {nxt.name} xem.")
+        shared = self.deck.peek(3)
+        if nxt and shared:
+            self._peek_for(nxt.name, shared, source="share", shared_by=p.name)
+            self._say(f"{p.name} chia sẻ {len(shared)} thẻ trên cùng cho {nxt.name} xem.")
 
     def _ask_reorder(self, p: Player, n: int, then) -> None:
         top = self.deck.peek(min(n, self.deck.size()))
@@ -1918,9 +2345,21 @@ class Game:
 
     # ---------- snapshot ----------
 
-    def _bomb_positions(self) -> list[int]:
+    def _bomb_position_by_id(self, bomb_id: str) -> int | None:
+        """Vị trí 1-based từ đỉnh deck (#1 = lá đỉnh kế tiếp) của 1 quả bom cụ thể."""
         size = self.deck.size()
-        return [size - 1 - i for i, c in enumerate(self.deck.cards) if c.type in BOMBS]
+        for i, c in enumerate(self.deck.cards):
+            if c.id == bomb_id:
+                return size - i
+        return None
+
+    def _bomb_positions_for(self, name: str) -> list[int]:
+        """Các vị trí 1-based từ đỉnh deck của những quả bom người chơi này đã soi bằng Clairvoyance."""
+        watched = self.clairvoyance_targets.get(name)
+        if not watched:
+            return []
+        size = self.deck.size()
+        return sorted(size - i for i, c in enumerate(self.deck.cards) if c.id in watched)
 
     def view(self, name: str) -> dict:
         me = self.players[name]
@@ -1941,8 +2380,12 @@ class Game:
         }
         if name in self.private_peeks:
             you["peek"] = self.private_peeks[name]
-        if name in self.bomb_watchers:
-            you["bomb_positions"] = self._bomb_positions()
+            if name in self.private_peek_meta:
+                you["peek_meta"] = self.private_peek_meta[name]
+        watched_positions = self._bomb_positions_for(name)
+        if watched_positions:
+            you["bomb_positions"] = watched_positions
+        you["can_clairvoyance"] = self._can_play_clairvoyance(name)
         return {
             "phase": self.phase,
             "winner": self.winner,

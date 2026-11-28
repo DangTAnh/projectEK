@@ -62,11 +62,29 @@ function BombDotIcon({ size = 15 }) {
   )
 }
 
-function FutureVisionPanel({ cards, open, onToggle, catalog, onInspectCard }) {
+function FutureVisionPanel({ cards, peekMeta, open, onToggle, catalog, onInspectCard }) {
   if (!cards?.length) return null
 
   const hasBomb = cards.some((c) => isBombType(c?.type))
   const bombFirst = isBombType(cards[0]?.type)
+  const isShared = peekMeta?.source === 'share'
+  const isIlltake = peekMeta?.source === 'illtakethat'
+  const sharedBy = peekMeta?.from || ''
+  const eyebrow = isShared
+    ? 'SHARE THE FUTURE'
+    : isIlltake
+      ? "I'LL TAKE THAT"
+      : 'SEE THE FUTURE'
+  const title = isShared
+    ? (sharedBy ? `${sharedBy} chia sẻ Top ${cards.length} lá` : `Được chia sẻ Top ${cards.length} lá`)
+    : isIlltake
+      ? (sharedBy ? `Bạn vừa rút & đưa cho ${sharedBy}` : "Lá vừa rút (I'll Take That)")
+      : `Top ${cards.length} Cards`
+  const dockLabel = isShared
+    ? `Chia sẻ · Top ${cards.length}`
+    : isIlltake
+      ? (sharedBy ? `Đưa → ${sharedBy}` : "I'll Take That")
+      : `Top ${cards.length}`
 
   if (!open) {
     return (
@@ -74,11 +92,17 @@ function FutureVisionPanel({ cards, open, onToggle, catalog, onInspectCard }) {
         type="button"
         className={`fv-dock-pill ${hasBomb ? 'has-bomb' : ''}`}
         onClick={onToggle}
-        title="Mở lại tầm nhìn tương lai"
+        title={
+          isShared
+            ? 'Mở lại các lá được chia sẻ'
+            : isIlltake
+              ? "Mở lại lá vừa rút (I'll Take That)"
+              : 'Mở lại tầm nhìn tương lai'
+        }
         aria-expanded={false}
       >
         <EyeIcon size={15} />
-        <span className="fv-dock-label">Top {cards.length}</span>
+        <span className="fv-dock-label">{dockLabel}</span>
         {hasBomb && (
           <span className="fv-dock-danger">
             <span className="fv-dock-danger-dot" aria-hidden="true" />
@@ -93,12 +117,18 @@ function FutureVisionPanel({ cards, open, onToggle, catalog, onInspectCard }) {
     <section
       className={`fv-stage ${hasBomb ? 'has-bomb' : ''}`}
       role="region"
-      aria-label="See the Future — Top Deck Cards"
+      aria-label={
+        isShared
+          ? 'Share the Future — Shared Top Deck Cards'
+          : isIlltake
+            ? "I'll Take That — Drawn Card"
+            : 'See the Future — Top Deck Cards'
+      }
     >
       <header className="fv-header">
         <div className="fv-title-group">
-          <span className="fv-eyebrow">SEE THE FUTURE</span>
-          <h3 className="fv-title">Top {cards.length} Cards</h3>
+          <span className="fv-eyebrow">{eyebrow}</span>
+          <h3 className="fv-title">{title}</h3>
         </div>
 
         <div className="fv-header-controls">
@@ -123,7 +153,7 @@ function FutureVisionPanel({ cards, open, onToggle, catalog, onInspectCard }) {
         {cards.map((c, i) => {
           const bomb = isBombType(c?.type)
           const safe = !bomb && isSafeType(c?.type)
-          const cardName = getCardName(catalog, c?.type)
+          const cardName = getCardName(catalog, c?.type, c?.variant)
           const slotClass = [
             'fv-slot',
             i === 0 ? 'is-next' : '',
@@ -137,7 +167,7 @@ function FutureVisionPanel({ cards, open, onToggle, catalog, onInspectCard }) {
               <div className={slotClass} style={{ '--fv-delay': `${i * 55}ms` }}>
                 <div className="fv-slot-head">
                   <span className="fv-order-badge">
-                    {i === 0 ? '#1 · NEXT' : `#${i + 1}`}
+                    {isIlltake ? 'VỪA RÚT' : i === 0 ? '#1 · NEXT' : `#${i + 1}`}
                   </span>
                   {bomb && <span className="fv-tag is-bomb">BOMB</span>}
                   {safe && <span className="fv-tag is-safe">SAFE</span>}
@@ -179,7 +209,7 @@ export const RevealedFutureStrip = React.memo(function RevealedFutureStrip({
       <div className="fv-strip-row">
         {cards.map((c, i) => {
           const bomb = isBombType(c?.type)
-          const cardName = getCardName(catalog, c?.type)
+          const cardName = getCardName(catalog, c?.type, c?.variant)
           return (
             <React.Fragment key={c?.id || `${c?.type || 'rev'}-${i}`}>
               {i > 0 && <span className="fv-strip-arrow" aria-hidden="true">›</span>}

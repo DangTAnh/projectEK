@@ -5,7 +5,7 @@ import random
 import pytest
 
 from server.engine import Game, GameError
-from server.engine.cards import CARD_META
+from server.engine.cards import CARD_META, Card
 from server.engine.deck import Deck
 
 # ---------- helpers ----------
@@ -30,8 +30,8 @@ def give(g, name, ctype, variant=0):
             card = g.deck.cards.pop(i)
             g.players[name].hand.append(card)
             return card
-    from server.engine.cards import Card
-    card = Card(id=f"{ctype}.{variant}.test", type=ctype, variant=variant)
+    g._card_seq += 1
+    card = Card(id=f"{ctype}.{variant}.test.{g._card_seq}", type=ctype, variant=variant)
     g.players[name].hand.append(card)
     return card
 
@@ -333,18 +333,155 @@ class TestFutureCards:
         act(g, first, "revealthefuture3x")
         assert [c.to_dict() for c in g.revealed] == expected
 
-    def test_clairvoyance_bomb_positions(self):
-        g = make_game(2)
+    def test_sharethefuture_shows_next_alive_and_persists_until_next_acts(self):
+        g = make_game(3)
         first = cur(g).name
-        give(g, first, "clairvoyance")
-        g.play_now(first, find_hand(g, first, "clairvoyance").id)
-        if g.nope is not None:
-            all_pass(g)
-        v = g.view("P1")
-        assert "bomb_positions" not in v["you"]
-        v = g.view(first)
-        pos = v["you"]["bomb_positions"]
-        assert isinstance(pos, list)
+        nxt = g._next_alive(g.current()).name
+        other = next(n for n in g.order if n not in (first, nxt))
+        # Đảm bảo lá đỉnh sau reorder không phải bom để draw() an toàn
+        g.debug_put_deck("skip", index=0)
+        g.debug_put_deck("favor", index=0)
+        g.debug_put_deck("shuffle", index=0)
+        give(g, first, "sharethefuture3x")
+        act(g, first, "sharethefuture3x")
+        assert g.pending["kind"] == "reorder"
+        ids = [c["id"] for c in g.pending["data"]["cards"]]
+        reordered = list(reversed(ids))
+        g.respond(first, {"order": reordered})
+
+        expected = [c.to_dict() for c in g.deck.peek(3)]
+        assert [c["id"] for c in expected] == reordered
+        nxt_view = g.view(nxt)["you"]
+        assert nxt_view.get("peek") == expected
+        assert nxt_view.get("peek_meta", {}).get("source") == "share"
+        assert nxt_view.get("peek_meta", {}).get("from") == first
+        assert "peek" not in g.view(first)["you"]
+        assert "peek" not in g.view(other)["you"]
+
+        # Người đánh tiếp tục rút kết lượt -> người kế tiếp vẫn giữ peek đã được chia sẻ
+        g.draw(first)
+        assert cur(g).name == nxt
+        assert g.view(nxt)["you"].get("peek") == expected
+
+        # Khi chính người kế tiếp hành động -> peek được dọn
+        give(g, nxt, "skip")
+        act(g, nxt, "skip")
+        assert "peek" not in g.view(nxt)["you"]
+
+    def test_sharethefuture_respects_direction_and_skips_dead(self):
+        g = make_game(4)
+        first = cur(g).name
+        idx = g.order.index(first)
+        g.direction = -1
+        dead_name = g.order[(idx - 1) % 4]
+        expected_nxt = g.order[(idx - 2) % 4]
+        g.players[dead_name].alive = False
+
+        give(g, first, "sharethefuture3x")
+        act(g, first, "sharethefuture3x")
+        ids = [c["id"] for c in g.pending["data"]["cards"]]
+        g.respond(first, {"order": ids})
+
+        assert g.view(expected_nxt)["you"].get("peek") == [c.to_dict() for c in g.deck.peek(3)]
+        assert "peek" not in g.view(dead_name)["you"]
+
+    def test_clairvoyance_bomb_positions(self):
+        g = make_game(3)
+        first, watcher, third = g.order[0], g.order[1], g.order[2]
+        # Chưa có ai Defuse / Zombie Kitten đặt bom -> không đánh được Clairvoyance
+        cv = give(g, watcher, "clairvoyance")
+        assert g.view(watcher)["you"]["can_clairvoyance"] is False
+        with pytest.raises(GameError):
+            g.play_now(watcher, cv.id)
+
+        # Đặt sẵn 1 bom khác sâu trong deck (không được lộ bởi Clairvoyance cho quả bom kia)
+        other_bomb = g.debug_put_deck("explodingkitten", index=8)
+        # Người chơi first rút phải Exploding Kitten và Defuse -> mở pending pick_index
+        give(g, first, "defuse")
+        defused_bomb = g.debug_put_deck("explodingkitten", index=0)
+        g.draw(first)
+        assert g.pending is not None and g.pending["kind"] == "pick_index"
+        assert g.pending["owner"] == first
+        assert g.view(watcher)["you"]["can_clairvoyance"] is True
+        assert g.view(first)["you"]["can_clairvoyance"] is False
+
+        # Watcher đánh Clairvoyance ngay lúc first đang chọn vị trí chèn bom
+        g.play_now(watcher, cv.id)
+        assert g.nope is not None
+        # Khi cửa sổ Nope đang mở, first chưa được chốt respond
+        with pytest.raises(GameError):
+            g.respond(first, {"index": 2})
+        all_pass(g)
+
+        # First chèn bom vào index 2 (vị trí #3 từ đỉnh deck)
+        g.respond(first, {"index": 2})
+        assert g.pending is None
+        # Chỉ watcher thấy ĐÚNG vị trí #3 của quả bom vừa đặt (KHÔNG lộ other_bomb!)
+        v_watcher = g.view(watcher)
+        assert v_watcher["you"]["bomb_positions"] == [3]
+        assert any("#3" in line and "Clairvoyance" in line for line in v_watcher["log"])
+        # Người thứ 3 không thấy bomb_positions và log công khai không lộ vị trí chèn
+        v_third = g.view(third)
+        assert "bomb_positions" not in v_third["you"]
+        assert not any("#3" in line for line in v_third["log"])
+
+        # Third vẫn có thể dùng Clairvoyance ngay sau khi first vừa đặt xong (trước khi xáo deck)
+        cv3 = give(g, third, "clairvoyance")
+        assert g.view(third)["you"]["can_clairvoyance"] is True
+        g.play_now(third, cv3.id)
+        all_pass(g)
+        assert g.view(third)["you"]["bomb_positions"] == [3]
+        assert other_bomb.id not in g.clairvoyance_targets[third]
+        assert defused_bomb.id in g.clairvoyance_targets[third]
+
+        # Xáo deck -> vị trí bom đã soi không còn hợp lệ nên phải xóa
+        shuf = give(g, cur(g).name, "shufflenow")
+        g.play_now(cur(g).name, shuf.id)
+        all_pass(g)
+        assert "bomb_positions" not in g.view(watcher)["you"]
+        assert "bomb_positions" not in g.view(third)["you"]
+
+    def test_clairvoyance_zombie_kitten_and_nope_blocks_watching(self):
+        g = make_game(3)
+        first, watcher, dead = g.order[0], g.order[1], g.order[2]
+        g.players[dead].alive = False
+        # Loại Defuse khỏi tay first để first dùng Zombie Kitten
+        g.players[first].hand = [c for c in g.players[first].hand if c.type != "defuse"]
+        give(g, first, "zombiekitten")
+        give(g, first, "nope")
+        g.debug_put_deck("explodingkitten", index=0)
+
+        g.draw(first)
+        assert g.pending["kind"] == "yes_no"
+        g.respond(first, {"value": True})
+        assert g.pending["kind"] == "pick_index"
+        assert g.pending["data"]["reason"] == "zombie"
+        assert g.view(watcher)["you"]["can_clairvoyance"] is True
+
+        # Watcher đánh Clairvoyance nhưng bị first chặn bằng Nope -> không thấy vị trí bom
+        cv = give(g, watcher, "clairvoyance")
+        g.play_now(watcher, cv.id)
+        g.stack_nope(first)
+        g.pass_nope(watcher)
+        g.resolve_nope()
+
+        g.respond(first, {"index": 0})
+        g.respond(first, {"player": dead})  # hồi sinh dead
+        assert "bomb_positions" not in g.view(watcher)["you"]
+
+    def test_bury_and_defuse_log_one_based_positions_while_protocol_is_zero_based(self):
+        g = make_game(2)
+        first, other = g.order[0], g.order[1]
+        top_card = g.debug_put_deck("skip", index=0)
+        give(g, first, "bury")
+        act(g, first, "bury")
+        assert g.pending["kind"] == "pick_index"
+        assert g.pending["data"]["min"] == 0
+        # index 0 = đỉnh (#1 từ đỉnh)
+        g.respond(first, {"index": 0})
+        assert g.deck.peek(1)[0].id == top_card.id
+        assert any("#1" in line for line in g.view(first)["log"])
+        assert not any("#1" in line for line in g.view(other)["log"])
 
     def test_digdeeper_keep(self):
         g = make_game(2)
@@ -452,6 +589,22 @@ class TestComboSteal:
         with pytest.raises(GameError):  # mèo + action không thành combo
             g.play_combo(first, "pair", hand_ids(g, first)[-2:])
 
+    def test_combo_rejects_different_cat_variants(self):
+        g = make_game(2)
+        first = cur(g).name
+        c1 = give(g, first, "cat", 23)
+        c2 = give(g, first, "cat", 24)
+        feral = give(g, first, "feralcat", 0)
+        with pytest.raises(GameError):  # 2 lá cat khác loại (khác variant)
+            g.play_combo(first, "pair", [c1.id, c2.id])
+        with pytest.raises(GameError):  # 2 lá cat khác loại + feralcat cũng không hợp lệ
+            g.play_combo(first, "three", [c1.id, c2.id, feral.id])
+        # Cùng loại mèo (cùng variant) hoặc 1 cat + feralcat vẫn hợp lệ
+        c1_dup = give(g, first, "cat", 23)
+        g.play_combo(first, "pair", [c1.id, c1_dup.id])
+        all_pass(g)
+        assert g.pending is not None and g.pending["kind"] == "pick_player"
+
     def test_receive_bomb_kills_without_defuse(self):
         g = make_game(2)
         first, other = cur(g).name, g.order[1]
@@ -505,6 +658,94 @@ class TestPlayerEffects:
         g.draw(other)  # rút thành công -> khỏi mù
         assert not g.players[other].blind
 
+    def test_blind_draw_bomb_must_pick_blindly_until_defuse(self):
+        g = make_game(3)
+        first = cur(g).name
+        p = g.players[first]
+        p.blind = True
+        cat = Card(id="cat.0.bd1", type="cat", variant=0)
+        df = Card(id="defuse.0.bd2", type="defuse", variant=0)
+        p.hand = [cat, df]
+        bomb = g.debug_put_deck("explodingkitten", index=0)
+
+        g.draw(first)
+        # Không được tự động defuse: phải mở pending chọn lá úp
+        assert g.pending is not None
+        assert g.pending["kind"] == "pick_card"
+        assert g.pending["owner"] == first
+        assert g.pending["data"]["source"] == "own_hand"
+        assert g.pending["data"]["reason"] == "blind_defuse"
+        assert p.blind is True
+        assert p.alive is True
+
+        # Chọn trượt trúng Cat -> bỏ xuống grave, mất hiệu lực, tiếp tục chọn
+        g.respond(first, {"card_id": "blind.0"})
+        assert cat in g.grave
+        assert p.alive is True and p.blind is True
+        assert g.pending["kind"] == "pick_card"
+        assert g.pending["data"]["reason"] == "blind_defuse"
+        assert g.pending["data"]["last_wasted"] == "Cat"
+
+        # Chọn trúng Defuse (giờ ở blind.0) -> cứu sống, gỡ blind, cho chọn vị trí chèn bom
+        g.respond(first, {"card_id": "blind.0"})
+        assert df in g.grave
+        assert p.alive is True
+        assert p.blind is False
+        assert g.pending["kind"] == "pick_index"
+        assert g.pending["data"]["reason"] == "defuse"
+        g.respond(first, {"index": 0})
+        assert g.pending is None
+        assert g.deck.peek(1)[0].id == bomb.id
+
+    def test_blind_draw_bomb_picking_skip_or_superskip_explodes_immediately(self):
+        for fatal_type in ("skip", "superskip", "personalattack3x"):
+            g = make_game(3)
+            first = cur(g).name
+            p = g.players[first]
+            p.blind = True
+            fatal = Card(id=f"{fatal_type}.0.bd", type=fatal_type, variant=0)
+            df = Card(id="defuse.0.bd", type="defuse", variant=0)
+            p.hand = [fatal, df]
+            g.debug_put_deck("explodingkitten", index=0)
+
+            g.draw(first)
+            assert g.pending["data"]["reason"] == "blind_defuse"
+            g.respond(first, {"card_id": "blind.0"})
+            assert p.alive is False
+            assert fatal in g.grave
+            assert g.pending is None
+
+    def test_blind_draw_bomb_running_out_of_cards_explodes(self):
+        g = make_game(3)
+        first = cur(g).name
+        p = g.players[first]
+        p.blind = True
+        cat = Card(id="cat.0.empty", type="cat", variant=0)
+        p.hand = [cat]
+        g.debug_put_deck("explodingkitten", index=0)
+
+        g.draw(first)
+        assert g.pending["data"]["reason"] == "blind_defuse"
+        g.respond(first, {"card_id": "blind.0"})
+        assert cat in g.grave
+        assert p.alive is False
+        assert g.pending is None
+
+    def test_blind_draw_bomb_protected_by_streaking_kitten(self):
+        g = make_game(3)
+        first = cur(g).name
+        p = g.players[first]
+        p.blind = True
+        sk = Card(id="streakingkitten.0.bd", type="streakingkitten", variant=0)
+        p.hand = [sk]
+        bomb = g.debug_put_deck("explodingkitten", index=0)
+
+        g.draw(first)
+        assert p.alive is True
+        assert p.blind is False
+        assert bomb in p.hand
+        assert g.pending is None
+
     def test_mark_reveals_one_card(self):
         g = make_game(2)
         first, other = cur(g).name, g.order[1]
@@ -528,9 +769,24 @@ class TestPlayerEffects:
         g.respond(cur(g).name, {"position": pos})
         assert g.players[other].marked_id is None
 
-    def test_illtake_intercepts_next_draw(self):
+    def test_blind_as_a_bat_variant_display_and_fuzzy_match(self):
+        from server.engine.cards import card_display_name
+
+        assert card_display_name("curseofthecatbutt", 0) == "Curse of the Cat Butt"
+        assert card_display_name("curseofthecatbutt", 1) == "Blind As A Bat"
         g = make_game(2)
-        first, other = cur(g).name, g.order[1]
+        first, victim = cur(g).name, g.order[1]
+        assert g._fuzzy_type("Blind As A Bat") == "curseofthecatbutt"
+        give(g, first, "curseofthecatbutt", variant=1)
+        play_type(g, first, "curseofthecatbutt")
+        all_pass(g)
+        g.respond(first, {"player": victim})
+        assert g.players[victim].blind is True
+        assert any("Blind As A Bat" in line for line in g.log)
+
+    def test_illtake_intercepts_next_draw(self):
+        g = make_game(3)
+        first, other, third = cur(g).name, g.order[1], g.order[2]
         give(g, first, "illtakethat")
         play_type(g, first, "illtakethat")  # không nope được nên hỏi mục tiêu ngay
         g.respond(first, {"player": other})
@@ -539,9 +795,57 @@ class TestPlayerEffects:
         g.draw(first)  # first rút lá an toàn để hết lượt
         assert cur(g).name == other
         put_top_safe(g, "seethefuture3x")
-        g.draw(other)  # other rút — lá bị giật
+        drawn_id = g.deck.peek(1)[0].id
+        g.draw(other)  # other rút — thấy lá vừa rút trước khi chuyển cho first
         assert find_hand(g, first, "seethefuture3x") is not None
-        assert cur(g).name == first  # other kết thúc lượt bình thường
+        assert cur(g).name == third  # other kết thúc lượt bình thường
+        # Người rút thấy rõ lá bài vừa rút qua private peek và private log
+        other_view = g.view(other)
+        assert other_view["you"].get("peek") and other_view["you"]["peek"][0]["id"] == drawn_id
+        assert other_view["you"].get("peek_meta", {}).get("source") == "illtakethat"
+        assert other_view["you"].get("peek_meta", {}).get("from") == first
+        assert any("See the Future 3x" in line and first in line for line in other_view["log"])
+        # Người thứ 3 không bị lộ lá bài đã chuyển
+        third_view = g.view(third)
+        assert "peek" not in third_view["you"]
+        assert not any("See the Future 3x" in line for line in third_view["log"])
+        assert not any("seethefuture3x" in str(ev) for ev in third_view["fx_events"])
+
+    def test_illtake_blind_drawer_sees_card_and_unblinds(self):
+        g = make_game(2)
+        first, other = cur(g).name, g.order[1]
+        g.players[other].illtake_by = first
+        g.players[other].blind = True
+        g.players[first].blind = True
+        g.turn_index = g.order.index(other)
+        put_top_safe(g, "attack2x")
+        drawn_id = g.deck.peek(1)[0].id
+
+        g.draw(other)
+        assert g.players[other].blind is False  # hết blind sau khi rút thành công
+        assert g.players[first].blind is True   # người đặt bẫy vẫn giữ trạng thái blind
+        assert find_hand(g, first, "attack2x") is not None
+        other_view = g.view(other)
+        assert other_view["you"].get("peek") and other_view["you"]["peek"][0]["id"] == drawn_id
+        assert any("Attack 2x" in line for line in other_view["log"])
+        # Người đặt bẫy đang mù thì không bị lộ tên lá qua log riêng
+        assert not any("Attack 2x" in line for line in g.view(first)["log"])
+
+    def test_illtake_blind_drawer_sees_intercepted_bomb_and_unblinds(self):
+        g = make_game(2)
+        first, other = cur(g).name, g.order[1]
+        g.players[other].illtake_by = first
+        g.players[other].blind = True
+        g.turn_index = g.order.index(other)
+        give(g, first, "defuse")
+        bomb = g.debug_put_deck("explodingkitten", index=0)
+
+        g.draw(other)
+        assert g.players[other].blind is False
+        other_view = g.view(other)
+        assert other_view["you"].get("peek") and other_view["you"]["peek"][0]["id"] == bomb.id
+        assert other_view["you"].get("peek_meta", {}).get("source") == "illtakethat"
+        assert g.pending is not None and g.pending["owner"] == first
 
     def test_favor_transfer(self):
         g = make_game(2)
@@ -707,6 +1011,34 @@ class TestMisc:
         give(g, first, "graverobber")
         with pytest.raises(GameError):
             play_type(g, first, "graverobber")
+
+    def test_graverobber_auto_random_multiple_dead_and_dead_pending_safety(self):
+        g = make_game(4)
+        first, d1, d2 = g.order[0], g.order[2], g.order[3]
+        g.players[d1].alive = False
+        g.players[d2].alive = False
+        c1 = Card(id="favor.0.gr1", type="favor", variant=0)
+        god1 = Card(id="godcat.0.gr1", type="godcat", variant=0)
+        sk2 = Card(id="streakingkitten.0.gr2", type="streakingkitten", variant=0)
+        ek2 = Card(id="explodingkitten.0.gr2", type="explodingkitten", variant=0)
+        g.players[d1].hand = [god1, c1]
+        g.players[d2].hand = [sk2, ek2]
+        deck_before = g.deck.size()
+
+        give(g, first, "graverobber")
+        act(g, first, "graverobber")
+        assert g.pending is None
+        assert g.deck.size() == deck_before + 2
+        assert god1 in g.players[d1].hand and c1 not in g.players[d1].hand
+        assert len(g.players[d2].hand) == 1
+
+        # Trường hợp người chết đang giữ pending revive (vd ngắt kết nối giữa chừng) -> auto_resolve_dead_pending giải phóng
+        ftd = give(g, d1, "feedthedead")
+        g.play_now(d1, ftd.id)
+        all_pass(g)
+        assert g.pending is not None and g.pending["owner"] == d1
+        assert g.auto_resolve_dead_pending(include_revive=True) is True
+        assert g.pending is None or g.pending["owner"] != d1
 
     def test_towerofpower_returns_to_deck(self):
         g = make_game(2)

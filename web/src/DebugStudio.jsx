@@ -1266,18 +1266,18 @@ export default function DebugStudio({ initialCode = '' }) {
                                   title={`ID: ${c.id}${isMarked ? ' · Đang bị Mark' : ''}`}
                                 >
                                   <span className="ds-chip-emoji">{CARD_EMOJI[c.type] || '🃏'}</span>
-                                  <span className="ds-chip-name">{getCardName(catalog, c.type)}</span>
+                                  <span className="ds-chip-name">{getCardName(catalog, c.type, c.variant)}</span>
                                   {c.faceup && <span className="ds-chip-flag">👁️</span>}
                                   {isMarked && <span className="ds-chip-flag">📌</span>}
                                   <button
                                     type="button"
                                     className="ds-chip-rm"
                                     disabled={busy}
-                                    aria-label={`Bỏ ${getCardName(catalog, c.type)} khỏi tay ${p.name}`}
+                                    aria-label={`Bỏ ${getCardName(catalog, c.type, c.variant)} khỏi tay ${p.name}`}
                                     title="Bỏ lá bài này khỏi tay"
                                     onClick={() => runOp(
                                       { op: 'remove_card', target: p.name, card_id: c.id },
-                                      `Đã bỏ ${getCardName(catalog, c.type)} khỏi tay ${p.name}.`,
+                                      `Đã bỏ ${getCardName(catalog, c.type, c.variant)} khỏi tay ${p.name}.`,
                                     )}
                                   >
                                     ×
@@ -1314,7 +1314,7 @@ export default function DebugStudio({ initialCode = '' }) {
                           title={`Vị trí #${idx + 1} · ID: ${c.id}${c.faceup ? ' · Đang lật ngửa' : ''}`}
                         >
                           <span className="ds-deck-num">#{idx + 1}</span>
-                          <span>{CARD_EMOJI[c.type] || '🃏'} {getCardName(catalog, c.type)}</span>
+                          <span>{CARD_EMOJI[c.type] || '🃏'} {getCardName(catalog, c.type, c.variant)}</span>
                           {c.faceup && <span className="ds-faceup-tag">NGỬA</span>}
                         </span>
                       )

@@ -739,6 +739,101 @@
   animation-name: ctf-pill-pop-top;
 }
 
+/* ══════════════════════════════════════════════════════════
+   MODE 3b: I'll Take That reveal -> handover (face-up card shown before giving away)
+   ══════════════════════════════════════════════════════════ */
+.mode-give_out.is-illtake-reveal {
+  --ctf-dur: 1650ms;
+}
+
+.mode-give_out.is-illtake-reveal .ctf-deck-ring {
+  left: calc(50% + var(--ctf-dx));
+  top: calc(50% + var(--ctf-dy));
+}
+
+.mode-give_out.is-illtake-reveal .ctf-card-track {
+  width: 112px;
+  height: 156px;
+  margin-left: -56px;
+  margin-top: -78px;
+  animation: ctf-card-illtake-reveal var(--ctf-dur) cubic-bezier(0.22, 1, 0.36, 1) forwards;
+}
+
+.mode-give_out.is-illtake-reveal .ctf-card-frame {
+  border-width: 2px;
+  border-color: rgba(242, 92, 59, 0.85);
+  box-shadow: 0 16px 34px rgba(0, 0, 0, 0.68);
+}
+
+.mode-give_out.is-illtake-reveal .ctf-hand-track {
+  animation: ctf-hand-illtake-reveal var(--ctf-dur) cubic-bezier(0.22, 1, 0.36, 1) forwards;
+}
+
+.mode-give_out.is-illtake-reveal .ctf-pill-wrap {
+  animation: ctf-pill-illtake-reveal var(--ctf-dur) cubic-bezier(0.22, 1, 0.36, 1) forwards;
+}
+
+@keyframes ctf-card-illtake-reveal {
+  0% {
+    opacity: 0;
+    transform: translate3d(var(--ctf-dx), var(--ctf-dy), 0) rotate(-6deg) scale(0.75);
+  }
+  16% {
+    opacity: 1;
+    transform: translate3d(0px, -10px, 0) rotate(-2deg) scale(1.12);
+  }
+  58% {
+    opacity: 1;
+    transform: translate3d(0px, -10px, 0) rotate(0deg) scale(1.12);
+  }
+  84% {
+    opacity: 0.96;
+    transform: translate3d(38px, -138px, 0) rotate(9deg) scale(0.78);
+  }
+  100% {
+    opacity: 0;
+    transform: translate3d(62px, -210px, 0) rotate(14deg) scale(0.58);
+  }
+}
+
+@keyframes ctf-hand-illtake-reveal {
+  0%, 48% {
+    opacity: 0;
+    transform: translate3d(64px, 160px, 0) rotate(12deg) scale(0.95);
+  }
+  62% {
+    opacity: 1;
+    transform: translate3d(18px, 46px, 0) rotate(-2deg) scale(0.98);
+  }
+  86% {
+    opacity: 0.94;
+    transform: translate3d(52px, -110px, 0) rotate(6deg) scale(0.86);
+  }
+  100% {
+    opacity: 0;
+    transform: translate3d(72px, -182px, 0) rotate(12deg) scale(0.78);
+  }
+}
+
+@keyframes ctf-pill-illtake-reveal {
+  0% {
+    opacity: 0;
+    transform: translate3d(-50%, calc(-50% + 126px), 0) scale(0.88);
+  }
+  14% {
+    opacity: 1;
+    transform: translate3d(-50%, calc(-50% + 108px), 0) scale(1.03);
+  }
+  82% {
+    opacity: 1;
+    transform: translate3d(-50%, calc(-50% + 108px), 0) scale(1);
+  }
+  100% {
+    opacity: 0;
+    transform: translate3d(-50%, calc(-50% + 96px), 0) scale(0.94);
+  }
+}
+
 @keyframes ctf-pill-pop-top {
   0% {
     opacity: 0;

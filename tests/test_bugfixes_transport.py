@@ -806,7 +806,9 @@ def test_spectator_join_privacy_actions_cap_and_promotion():
         g._say("bí mật riêng tư", private=first)
         g._say("sự kiện công khai")
         g.private_peeks[first] = [{"id": "peek.0", "type": "skip", "variant": 0}]
-        g.bomb_watchers.add(first)
+        bomb = g.debug_put_deck("explodingkitten", index=0)
+        g.clairvoyance_targets[first] = {bomb.id}
+        assert room._view_for(first)["you"].get("bomb_positions")
         g.pending = {
             "kind": "reorder",
             "owner": first,
