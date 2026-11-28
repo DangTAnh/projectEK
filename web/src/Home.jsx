@@ -110,7 +110,8 @@ export default function Home() {
         <p className="tagline">Rút bài chiến thuật — tránh mèo nổ, sống sót đến cuối cùng.</p>
       </header>
 
-      <section className="panel" aria-label="Tạo hoặc vào phòng">
+      <div className="home-grid">
+        <section className="panel" aria-label="Tạo hoặc vào phòng">
         <div className="home-cat-row">
           <button
             type="button"
@@ -251,6 +252,7 @@ export default function Home() {
           </div>
         )}
       </section>
+      </div>
 
       <CatCustomizerModal
         open={catOpen}

@@ -100,10 +100,12 @@ export default function LobbyPanel({
     <section className="lobby-stage" aria-label="Sảnh chờ">
       <div className="lobby-panel">
         <div className="lobby-head">
-          <div>
+          <div className="lobby-head-main">
             <span className="lobby-eyebrow">Sảnh chờ</span>
-            <h2>Phòng <span className="lobby-code">{code}</span></h2>
-            <p>{players.length}/9 người chơi sẵn sàng · Cần ít nhất 2 người để bắt đầu</p>
+            <div className="lobby-title-row">
+              <h2>Phòng <span className="lobby-code">{code}</span></h2>
+              <p>{players.length}/9 người sẵn sàng · Cần ít nhất 2 người</p>
+            </div>
           </div>
           <div className="lobby-share">
             <button type="button" className="secondary-btn" onClick={onCopyCode}>Sao chép mã</button>
@@ -113,137 +115,141 @@ export default function LobbyPanel({
           </div>
         </div>
 
-        <div className="lobby-block">
-          <div className="lobby-block-head">
-            <span>Người chơi</span>
-            <div className="lobby-roster-head-right">
-              {onEditAvatar && (
-                <button
-                  type="button"
-                  className="lobby-cat-edit-btn"
-                  onClick={onEditAvatar}
-                >
-                  Tùy chỉnh mèo
-                </button>
-              )}
-              <span className="lobby-pill-count">{players.length} / 9</span>
-            </div>
-          </div>
-          <div className="lobby-roster">
-            {players.map((p) => {
-              const isMe = p.name === name
-              return (
-                <div
-                  key={p.name}
-                  className={`lobby-player ${isMe ? 'me' : ''} ${p.connected === false ? 'offline' : ''}`}
-                >
-                  {isMe && onEditAvatar ? (
+        <div className="lobby-body">
+          <aside className="lobby-side">
+            <div className="lobby-block lobby-players-block">
+              <div className="lobby-block-head">
+                <span>Người chơi</span>
+                <div className="lobby-roster-head-right">
+                  {onEditAvatar && (
                     <button
                       type="button"
-                      className="lobby-cat-perch editable"
-                      title="Bấm để tùy chỉnh mèo"
-                      aria-label="Tùy chỉnh nhân vật mèo"
+                      className="lobby-cat-edit-btn"
                       onClick={onEditAvatar}
                     >
-                      <CatAvatar avatar={p.avatar} name={p.name} size={50} />
+                      Tùy chỉnh mèo
                     </button>
-                  ) : (
-                    <div className="lobby-cat-perch">
-                      <CatAvatar avatar={p.avatar} name={p.name} size={50} />
-                    </div>
                   )}
-                  <div className="lobby-player-plate">
-                    <span className="lobby-player-name">{p.name}</span>
-                    {isMe && <em className="me-tag">Bạn</em>}
-                    {p.connected === false && (
-                      <span className="offline-tag" title="Mất kết nối">
-                        <span className="offline-pulse-dot" aria-hidden="true" />
-                      </span>
-                    )}
-                  </div>
+                  <span className="lobby-pill-count">{players.length} / 9</span>
                 </div>
-              )
-            })}
-          </div>
-        </div>
+              </div>
+              <div className="lobby-roster">
+                {players.map((p) => {
+                  const isMe = p.name === name
+                  return (
+                    <div
+                      key={p.name}
+                      className={`lobby-player ${isMe ? 'me' : ''} ${p.connected === false ? 'offline' : ''}`}
+                    >
+                      {isMe && onEditAvatar ? (
+                        <button
+                          type="button"
+                          className="lobby-cat-perch editable"
+                          title="Bấm để tùy chỉnh mèo"
+                          aria-label="Tùy chỉnh nhân vật mèo"
+                          onClick={onEditAvatar}
+                        >
+                          <CatAvatar avatar={p.avatar} name={p.name} size={40} />
+                        </button>
+                      ) : (
+                        <div className="lobby-cat-perch">
+                          <CatAvatar avatar={p.avatar} name={p.name} size={40} />
+                        </div>
+                      )}
+                      <div className="lobby-player-plate">
+                        <span className="lobby-player-name">{p.name}</span>
+                        {isMe && <em className="me-tag">Bạn</em>}
+                        {p.connected === false && (
+                          <span className="offline-tag" title="Mất kết nối">
+                            <span className="offline-pulse-dot" aria-hidden="true" />
+                          </span>
+                        )}
+                      </div>
+                    </div>
+                  )
+                })}
+              </div>
+            </div>
 
-        <div className="lobby-block">
-          <div className="lobby-block-head desk-block-head">
-            <div className="desk-head-title">
-              <span>Chọn bộ bài</span>
-              <span className="desk-hint">Bỏ trống để chọn ngẫu nhiên</span>
+            <div className="lobby-actions">
+              <button
+                type="button"
+                className="primary lobby-start-btn"
+                disabled={!canStart}
+                onClick={onStart}
+              >
+                {players.length < 2 ? 'Đang chờ thêm người chơi…' : 'Bắt đầu ván mới'}
+              </button>
             </div>
-            <div className="desk-filter-tabs" role="tablist" aria-label="Lọc loại bộ bài">
-              {filterTabs.map((tab) => (
-                <button
-                  key={tab.key}
-                  type="button"
-                  role="tab"
-                  aria-selected={filter === tab.key}
-                  className={`desk-filter-tab ${filter === tab.key ? 'active' : ''}`}
-                  onClick={() => setFilter(tab.key)}
-                >
-                  {tab.label}
-                </button>
-              ))}
+          </aside>
+
+          <div className="lobby-block lobby-desks-col">
+            <div className="lobby-block-head desk-block-head">
+              <div className="desk-head-title">
+                <span>Chọn bộ bài</span>
+                <span className="desk-hint">Bỏ trống để chọn ngẫu nhiên</span>
+              </div>
+              <div className="desk-filter-tabs" role="tablist" aria-label="Lọc loại bộ bài">
+                {filterTabs.map((tab) => (
+                  <button
+                    key={tab.key}
+                    type="button"
+                    role="tab"
+                    aria-selected={filter === tab.key}
+                    className={`desk-filter-tab ${filter === tab.key ? 'active' : ''}`}
+                    onClick={() => setFilter(tab.key)}
+                  >
+                    {tab.label}
+                  </button>
+                ))}
+              </div>
             </div>
-          </div>
-          <div className="desk-votes">
-            {filteredDesks.map((d) => {
-              const voters = Object.entries(votes || {}).filter(([, v]) => v === d.id).map(([n]) => n)
-              const mine = voters.includes(name)
-              const typeLabel = d.isExpansion
-                ? (d.base_merged ? 'Expansion + Base' : 'Expansion')
-                : 'Standalone'
-              const countHint = d.isExpansion && d.expansion_card_count
-                ? `${d.expansion_card_count} lá mở rộng + bộ gốc`
-                : undefined
-              return (
-                <button
-                  key={d.id}
-                  type="button"
-                  className={`desk-card ${mine ? 'mine' : ''}`}
-                  style={d.theme_color ? { '--desk-accent': d.theme_color } : undefined}
-                  disabled={!connected}
-                  title={voters.length ? `Đã vote: ${voters.join(', ')}` : `Vote bộ bài ${d.title}`}
-                  onClick={() => onVoteDesk(d.id)}
-                >
-                  <div className="desk-card-top">
-                    <span className="desk-card-name">{d.title}</span>
-                    {voters.length > 0 && <span className="desk-vote-badge">{voters.length} vote</span>}
-                  </div>
-                  <div className="desk-card-meta">
-                    <span className={`desk-type-badge ${d.isExpansion ? 'expansion' : 'standalone'}`}>
-                      {typeLabel}
-                    </span>
-                    {d.card_count !== null && (
-                      <span className="desk-count-badge" title={countHint}>
-                        {d.card_count} lá
+            <div className="desk-votes">
+              {filteredDesks.map((d) => {
+                const voters = Object.entries(votes || {}).filter(([, v]) => v === d.id).map(([n]) => n)
+                const mine = voters.includes(name)
+                const typeLabel = d.isExpansion
+                  ? (d.base_merged ? 'Expansion + Base' : 'Expansion')
+                  : 'Standalone'
+                const countHint = d.isExpansion && d.expansion_card_count
+                  ? `${d.expansion_card_count} lá mở rộng + bộ gốc`
+                  : undefined
+                return (
+                  <button
+                    key={d.id}
+                    type="button"
+                    className={`desk-card ${mine ? 'mine' : ''}`}
+                    style={d.theme_color ? { '--desk-accent': d.theme_color } : undefined}
+                    disabled={!connected}
+                    title={voters.length ? `${d.description} (Đã vote: ${voters.join(', ')})` : d.description}
+                    onClick={() => onVoteDesk(d.id)}
+                  >
+                    <div className="desk-card-top">
+                      <span className="desk-card-name">{d.title}</span>
+                      {voters.length > 0 && <span className="desk-vote-badge">{voters.length}</span>}
+                    </div>
+                    <div className="desk-card-meta">
+                      <span className={`desk-type-badge ${d.isExpansion ? 'expansion' : 'standalone'}`}>
+                        {typeLabel}
                       </span>
-                    )}
-                  </div>
-                  <span className="desk-card-desc">
-                    {d.description}
-                  </span>
-                </button>
-              )
-            })}
-            {normalizedDesks.length === 0 && <span className="desk-hint">Đang tải danh sách bộ bài…</span>}
-            {normalizedDesks.length > 0 && filteredDesks.length === 0 && (
-              <span className="desk-hint">Không có bộ bài nào trong mục này.</span>
-            )}
+                      {d.card_count !== null && (
+                        <span className="desk-count-badge" title={countHint}>
+                          {d.card_count} lá
+                        </span>
+                      )}
+                    </div>
+                    <span className="desk-card-desc">
+                      {d.description}
+                    </span>
+                  </button>
+                )
+              })}
+              {normalizedDesks.length === 0 && <span className="desk-hint">Đang tải danh sách bộ bài…</span>}
+              {normalizedDesks.length > 0 && filteredDesks.length === 0 && (
+                <span className="desk-hint">Không có bộ bài nào trong mục này.</span>
+              )}
+            </div>
           </div>
-        </div>
-
-        <div className="lobby-actions">
-          <button
-            type="button"
-            className="primary lobby-start-btn"
-            disabled={!canStart}
-            onClick={onStart}
-          >
-            {players.length < 2 ? 'Đang chờ thêm người chơi…' : 'Bắt đầu ván mới'}
-          </button>
         </div>
       </div>
     </section>
