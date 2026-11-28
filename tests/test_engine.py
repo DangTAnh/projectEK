@@ -596,8 +596,8 @@ class TestPlayerEffects:
         assert any("Blind As A Bat" in line for line in g.log)
 
     def test_illtake_intercepts_next_draw(self):
-        g = make_game(2)
-        first, other = cur(g).name, g.order[1]
+        g = make_game(3)
+        first, other, third = cur(g).name, g.order[1], g.order[2]
         give(g, first, "illtakethat")
         play_type(g, first, "illtakethat")  # không nope được nên hỏi mục tiêu ngay
         g.respond(first, {"player": other})
@@ -606,9 +606,57 @@ class TestPlayerEffects:
         g.draw(first)  # first rút lá an toàn để hết lượt
         assert cur(g).name == other
         put_top_safe(g, "seethefuture3x")
-        g.draw(other)  # other rút — lá bị giật
+        drawn_id = g.deck.peek(1)[0].id
+        g.draw(other)  # other rút — thấy lá vừa rút trước khi chuyển cho first
         assert find_hand(g, first, "seethefuture3x") is not None
-        assert cur(g).name == first  # other kết thúc lượt bình thường
+        assert cur(g).name == third  # other kết thúc lượt bình thường
+        # Người rút thấy rõ lá bài vừa rút qua private peek và private log
+        other_view = g.view(other)
+        assert other_view["you"].get("peek") and other_view["you"]["peek"][0]["id"] == drawn_id
+        assert other_view["you"].get("peek_meta", {}).get("source") == "illtakethat"
+        assert other_view["you"].get("peek_meta", {}).get("from") == first
+        assert any("See the Future 3x" in line and first in line for line in other_view["log"])
+        # Người thứ 3 không bị lộ lá bài đã chuyển
+        third_view = g.view(third)
+        assert "peek" not in third_view["you"]
+        assert not any("See the Future 3x" in line for line in third_view["log"])
+        assert not any("seethefuture3x" in str(ev) for ev in third_view["fx_events"])
+
+    def test_illtake_blind_drawer_sees_card_and_unblinds(self):
+        g = make_game(2)
+        first, other = cur(g).name, g.order[1]
+        g.players[other].illtake_by = first
+        g.players[other].blind = True
+        g.players[first].blind = True
+        g.turn_index = g.order.index(other)
+        put_top_safe(g, "attack2x")
+        drawn_id = g.deck.peek(1)[0].id
+
+        g.draw(other)
+        assert g.players[other].blind is False  # hết blind sau khi rút thành công
+        assert g.players[first].blind is True   # người đặt bẫy vẫn giữ trạng thái blind
+        assert find_hand(g, first, "attack2x") is not None
+        other_view = g.view(other)
+        assert other_view["you"].get("peek") and other_view["you"]["peek"][0]["id"] == drawn_id
+        assert any("Attack 2x" in line for line in other_view["log"])
+        # Người đặt bẫy đang mù thì không bị lộ tên lá qua log riêng
+        assert not any("Attack 2x" in line for line in g.view(first)["log"])
+
+    def test_illtake_blind_drawer_sees_intercepted_bomb_and_unblinds(self):
+        g = make_game(2)
+        first, other = cur(g).name, g.order[1]
+        g.players[other].illtake_by = first
+        g.players[other].blind = True
+        g.turn_index = g.order.index(other)
+        give(g, first, "defuse")
+        bomb = g.debug_put_deck("explodingkitten", index=0)
+
+        g.draw(other)
+        assert g.players[other].blind is False
+        other_view = g.view(other)
+        assert other_view["you"].get("peek") and other_view["you"]["peek"][0]["id"] == bomb.id
+        assert other_view["you"].get("peek_meta", {}).get("source") == "illtakethat"
+        assert g.pending is not None and g.pending["owner"] == first
 
     def test_favor_transfer(self):
         g = make_game(2)

@@ -68,12 +68,23 @@ function FutureVisionPanel({ cards, peekMeta, open, onToggle, catalog, onInspect
   const hasBomb = cards.some((c) => isBombType(c?.type))
   const bombFirst = isBombType(cards[0]?.type)
   const isShared = peekMeta?.source === 'share'
+  const isIlltake = peekMeta?.source === 'illtakethat'
   const sharedBy = peekMeta?.from || ''
-  const eyebrow = isShared ? 'SHARE THE FUTURE' : 'SEE THE FUTURE'
+  const eyebrow = isShared
+    ? 'SHARE THE FUTURE'
+    : isIlltake
+      ? "I'LL TAKE THAT"
+      : 'SEE THE FUTURE'
   const title = isShared
     ? (sharedBy ? `${sharedBy} chia sẻ Top ${cards.length} lá` : `Được chia sẻ Top ${cards.length} lá`)
-    : `Top ${cards.length} Cards`
-  const dockLabel = isShared ? `Chia sẻ · Top ${cards.length}` : `Top ${cards.length}`
+    : isIlltake
+      ? (sharedBy ? `Bạn vừa rút & đưa cho ${sharedBy}` : "Lá vừa rút (I'll Take That)")
+      : `Top ${cards.length} Cards`
+  const dockLabel = isShared
+    ? `Chia sẻ · Top ${cards.length}`
+    : isIlltake
+      ? (sharedBy ? `Đưa → ${sharedBy}` : "I'll Take That")
+      : `Top ${cards.length}`
 
   if (!open) {
     return (
@@ -81,7 +92,13 @@ function FutureVisionPanel({ cards, peekMeta, open, onToggle, catalog, onInspect
         type="button"
         className={`fv-dock-pill ${hasBomb ? 'has-bomb' : ''}`}
         onClick={onToggle}
-        title={isShared ? 'Mở lại các lá được chia sẻ' : 'Mở lại tầm nhìn tương lai'}
+        title={
+          isShared
+            ? 'Mở lại các lá được chia sẻ'
+            : isIlltake
+              ? "Mở lại lá vừa rút (I'll Take That)"
+              : 'Mở lại tầm nhìn tương lai'
+        }
         aria-expanded={false}
       >
         <EyeIcon size={15} />
@@ -100,7 +117,13 @@ function FutureVisionPanel({ cards, peekMeta, open, onToggle, catalog, onInspect
     <section
       className={`fv-stage ${hasBomb ? 'has-bomb' : ''}`}
       role="region"
-      aria-label={isShared ? 'Share the Future — Shared Top Deck Cards' : 'See the Future — Top Deck Cards'}
+      aria-label={
+        isShared
+          ? 'Share the Future — Shared Top Deck Cards'
+          : isIlltake
+            ? "I'll Take That — Drawn Card"
+            : 'See the Future — Top Deck Cards'
+      }
     >
       <header className="fv-header">
         <div className="fv-title-group">
@@ -144,7 +167,7 @@ function FutureVisionPanel({ cards, peekMeta, open, onToggle, catalog, onInspect
               <div className={slotClass} style={{ '--fv-delay': `${i * 55}ms` }}>
                 <div className="fv-slot-head">
                   <span className="fv-order-badge">
-                    {i === 0 ? '#1 · NEXT' : `#${i + 1}`}
+                    {isIlltake ? 'VỪA RÚT' : i === 0 ? '#1 · NEXT' : `#${i + 1}`}
                   </span>
                   {bomb && <span className="fv-tag is-bomb">BOMB</span>}
                   {safe && <span className="fv-tag is-safe">SAFE</span>}

@@ -1112,7 +1112,17 @@ class Game:
             p.illtake_by = None
             if actor and actor.alive and actor is not p:
                 if card.type == "explodingkitten":
-                    self._emit_fx("transfer", actor=p.name, target=actor.name, card_type="illtakethat")
+                    # illtakethat.txt: người rút xem lá trước khi đưa đi và hết mù (kể cả khi đưa EK)
+                    p.blind = False
+                    self._peek_for(p.name, [card], source="illtakethat", shared_by=actor.name)
+                    self._say(
+                        f"Bạn rút {card_display_name(card)} và phải đưa cho {actor.name} (I'll Take That)!",
+                        private=p.name,
+                    )
+                    self._emit_fx(
+                        "transfer", actor=p.name, target=actor.name,
+                        card_type="illtakethat", source=source,
+                    )
                     self._say(f"{p.name} rút phải bom nhưng bị {actor.name} chặn lấy!")
                     self._handle_bomb(actor, card, remaining=1, end_after=False)
                     if self.phase == "playing":
@@ -1121,8 +1131,22 @@ class Game:
                         )
                     return
                 if card.type != "implodingkitten":  # ponytail: imploding không intercept
+                    p.blind = False
+                    self._peek_for(p.name, [card], source="illtakethat", shared_by=actor.name)
+                    self._say(
+                        f"Bạn rút {card_display_name(card)} và phải đưa cho {actor.name} (I'll Take That)!",
+                        private=p.name,
+                    )
                     actor.hand.append(card)
-                    self._emit_fx("transfer", actor=p.name, target=actor.name, card_type="illtakethat")
+                    if not actor.blind:
+                        self._say(
+                            f"Bạn nhận {card_display_name(card)} từ {p.name} (I'll Take That)!",
+                            private=actor.name,
+                        )
+                    self._emit_fx(
+                        "transfer", actor=p.name, target=actor.name,
+                        card_type="illtakethat", source=source,
+                    )
                     self._say(f"{p.name} rút thẻ nhưng bị {actor.name} giật mất!")
                     self._after_one_draw(p, remaining, end_after)
                     return

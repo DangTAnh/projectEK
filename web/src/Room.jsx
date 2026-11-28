@@ -480,7 +480,12 @@ export default function Room({ code }) {
                 const ev = latestTransfer
                 const fxKey = `${ev.seq}-${Date.now()}`
                 let deckAnchor = null
-                if (ev.kind === 'draw' || ev.kind === 'put_deck') {
+                const isMyIlltakeGive = (
+                  ev.kind === 'transfer'
+                  && ev.card_type === 'illtakethat'
+                  && ev.actor === name
+                )
+                if (ev.kind === 'draw' || ev.kind === 'put_deck' || isMyIlltakeGive) {
                   const tRect = tableRef.current?.getBoundingClientRect()
                   const dRect = deckRef.current?.getBoundingClientRect()
                   if (tRect && dRect && tRect.width > 0 && dRect.width > 0) {
@@ -502,12 +507,22 @@ export default function Room({ code }) {
                     deckAnchor,
                   }
                 } else if (ev.kind === 'transfer') {
+                  const revealedCard = (
+                    isMyIlltakeGive
+                    && nextView.you?.peek_meta?.source === 'illtakethat'
+                    && Array.isArray(nextView.you?.peek)
+                  )
+                    ? nextView.you.peek[0] || null
+                    : null
                   nextTransfer = {
                     key: fxKey,
                     mode: ev.actor === name ? 'give_out' : ev.target === name ? 'receive_in' : 'transfer_other',
                     reason: ev.card_type,
+                    source: ev.source || 'top',
                     actor: ev.actor,
                     target: ev.target,
+                    card: revealedCard,
+                    deckAnchor: isMyIlltakeGive ? deckAnchor : null,
                   }
                 } else if (ev.kind === 'put_deck') {
                   nextTransfer = {
@@ -1480,7 +1495,7 @@ export default function Room({ code }) {
             catalog={catalog}
             onInspectCard={setZoom}
           />
-          <CardTransferFx fx={transferFx} />
+          <CardTransferFx fx={transferFx} catalog={catalog} />
           <ActionCutscene fx={actionFx} />
         </div>
 

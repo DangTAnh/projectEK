@@ -1,4 +1,5 @@
 import React, { useEffect, useState } from 'react'
+import { getCardName } from '../utils/cardCatalog.js'
 import './CardTransferFx.css'
 
 function prefersReducedMotion() {
@@ -33,8 +34,8 @@ function FxImg({ src, fallback, className = '', resetKey }) {
   )
 }
 
-function getTransferLabel(fx) {
-  const { mode, source, reason, toDeck, actor, target } = fx
+function getTransferLabel(fx, catalog) {
+  const { mode, source, reason, toDeck, actor, target, card } = fx
 
   if (mode === 'draw_mine') {
     if (source === 'bottom') return 'DRAW BOTTOM!'
@@ -48,6 +49,9 @@ function getTransferLabel(fx) {
 
   if (mode === 'give_out') {
     if (toDeck) return 'PUT INTO DECK'
+    if (reason === 'illtakethat' && card) {
+      return `BẠN RÚT: ${getCardName(catalog, card.type, card.variant)}`
+    }
     if (reason === 'favor') return target ? `FAVOR → ${target}` : 'GIVE CARD'
     return target ? `GIVE → ${target}` : 'GIVE CARD'
   }
@@ -67,10 +71,11 @@ function getTransferLabel(fx) {
 }
 
 export function getTransferDuration(fx) {
+  if (fx?.reason === 'illtakethat' && fx?.mode === 'give_out' && fx?.card) return 1650
   return fx?.reason === 'favor' && fx?.mode === 'give_out' ? 980 : 850
 }
 
-export default React.memo(function CardTransferFx({ fx }) {
+export default React.memo(function CardTransferFx({ fx, catalog = null }) {
   if (!fx || !fx.mode || prefersReducedMotion()) return null
 
   const {
@@ -80,8 +85,18 @@ export default React.memo(function CardTransferFx({ fx }) {
     reason,
     toDeck = false,
     actor,
+    target,
+    card = null,
     deckAnchor = null,
   } = fx
+
+  const isIlltakeReveal = mode === 'give_out' && reason === 'illtakethat' && Boolean(card)
+  const cardImgSrc = isIlltakeReveal
+    ? `/static/cards/${card.type}/${card.variant ?? 0}.jpg`
+    : '/backside.jpg'
+  const cardImgFallback = isIlltakeReveal
+    ? `/static/cards/${card.type}/0.jpg`
+    : '/ui/sort.png'
 
   const anchorStyle = deckAnchor
     ? {
@@ -92,13 +107,15 @@ export default React.memo(function CardTransferFx({ fx }) {
       }
     : undefined
 
-  const label = getTransferLabel(fx)
+  const label = getTransferLabel(fx, catalog)
   const subLabel =
     mode === 'receive_in' && actor
       ? `FROM ${actor}`
-      : mode === 'give_out' && reason === 'favor'
-        ? 'HAND OVER · FAVOR'
-        : null
+      : isIlltakeReveal
+        ? (target ? `I'LL TAKE THAT → ${target}` : "I'LL TAKE THAT")
+        : mode === 'give_out' && reason === 'favor'
+          ? 'HAND OVER · FAVOR'
+          : null
 
   const rootClasses = [
     'card-transfer-layer',
@@ -106,6 +123,7 @@ export default React.memo(function CardTransferFx({ fx }) {
     source === 'bottom' ? 'is-bottom' : 'is-top',
     toDeck ? 'is-to-deck' : '',
     reason === 'favor' ? 'is-favor' : '',
+    isIlltakeReveal ? 'is-illtake-reveal' : '',
   ]
     .filter(Boolean)
     .join(' ')
@@ -114,7 +132,7 @@ export default React.memo(function CardTransferFx({ fx }) {
     <div key={key || mode} className={rootClasses} style={anchorStyle} aria-hidden="true">
       {mode === 'receive_in' && <div className="ctf-catch-ring" />}
       {mode === 'give_out' && toDeck && <div className="ctf-deck-ring" />}
-      {mode === 'draw_mine' && <div className="ctf-deck-ring ctf-draw-ring" />}
+      {(mode === 'draw_mine' || isIlltakeReveal) && <div className="ctf-deck-ring ctf-draw-ring" />}
 
       {mode === 'give_out' && reason === 'favor' && (
         <div className="ctf-favor-pop">
@@ -130,8 +148,8 @@ export default React.memo(function CardTransferFx({ fx }) {
       <div className="ctf-card-track">
         <div className="ctf-card-frame">
           <FxImg
-            src="/backside.jpg"
-            fallback="/ui/sort.png"
+            src={cardImgSrc}
+            fallback={cardImgFallback}
             className="ctf-card-img"
             resetKey={key}
           />
