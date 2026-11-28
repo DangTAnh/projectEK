@@ -70,3 +70,76 @@ def test_ws_unknown_room():
     with client.websocket_connect("/ws/ZZZZ?name=X") as ws:
         msg = ws.receive_json()
         assert msg["type"] == "error"
+
+
+def test_ws_spectator_rematch_code_and_preload_smoke():
+    from server.rooms import MANAGER
+
+    with TestClient(app) as tc:
+        code = MANAGER.create()
+        with tc.websocket_connect(f"/ws/{code}?name=An") as a, \
+                tc.websocket_connect(f"/ws/{code}?name=Binh") as b:
+            _recv_state(a)
+            _recv_state(b)
+            _recv_state(a)
+
+            a.send_json({"action": "start", "preload": True})
+            va = _recv_state(a)
+            while va.get("phase") != "loading":
+                va = _recv_state(a)
+            assert va["loading"]["desk"]
+            assert "/backside.jpg" in va["loading"]["images"]
+
+            a.send_json({"action": "assets_ready"})
+            b.send_json({"action": "assets_ready"})
+
+            va = _recv_state(a)
+            while va.get("phase") != "playing":
+                va = _recv_state(a)
+            assert va["display_code"] == code
+            assert va["real_code"] == code
+            assert va["turn_timer"] is not None
+
+            # Người thứ 3 vào phòng đang chơi -> chế độ khán giả
+            with tc.websocket_connect(f"/ws/{code}?name=Spec") as s:
+                vs = _recv_state(s)
+                assert vs["you"]["spectator"] is True
+                assert vs["you"]["hand"] == []
+                assert vs["spectator_count"] == 1
+                s.send_json({"action": "draw"})
+                err = s.receive_json()
+                assert err["type"] == "error"
+                assert "khán giả" in err["message"]
+
+                # Kết thúc ván -> rematch giữ display_code, đổi real_code, khán giả thành người chơi
+                room = MANAGER.get(code)
+                room.game.phase = "ended"
+                room.game.winner = "An"
+                a.send_json({"action": "rematch"})
+                va2 = _recv_state(a)
+                while va2.get("real_code") == code:
+                    va2 = _recv_state(a)
+                assert va2["display_code"] == code
+                assert va2["real_code"] != code
+                vs2 = _recv_state(s)
+                while vs2.get("real_code") == code:
+                    vs2 = _recv_state(s)
+                assert vs2["you"]["spectator"] is False
+                assert len(vs2["you"]["hand"]) >= 4
+
+                info = tc.get(f"/api/rooms/{code}").json()
+                assert info["code"] == code
+                assert info["display_code"] == code
+                assert info["real_code"] == va2["real_code"]
+                assert tc.get(f"/api/rooms/{va2['real_code']}").status_code == 200
+
+            # Đóng kết nối của s (giờ đã là người chơi trong ván mới), rồi kết nối lại không cần token cũ
+            with tc.websocket_connect(f"/ws/{code}?name=Spec") as s_rejoin:
+                vs3 = _recv_state(s_rejoin)
+                assert vs3["you"]["spectator"] is False
+                assert len(vs3["you"]["hand"]) >= 4
+                # Trong khi đang online thì vẫn chặn trùng tên không có token
+                with tc.websocket_connect(f"/ws/{code}?name=Spec") as dup:
+                    err2 = dup.receive_json()
+                    assert err2["type"] == "error"
+                    assert err2["code"] == "NAME_TAKEN"

@@ -1,9 +1,10 @@
-import React from 'react'
+import React, { useEffect } from 'react'
 import { createRoot } from 'react-dom/client'
 import Home from './Home.jsx'
 import Room from './Room.jsx'
 import DebugStudio from './DebugStudio.jsx'
 import './index.css'
+import './components/TableUx.css'
 
 // Lỗi render phải hiện lên màn hình thay vì để trang trắng im lặng
 class Boundary extends React.Component {
@@ -35,7 +36,19 @@ class Boundary extends React.Component {
   }
 }
 
+const CONTEXT_ALLOW_SELECTOR = 'input, textarea, select, [contenteditable="true"], [data-allow-context="true"]'
+
 function App() {
+  useEffect(() => {
+    function handleContextMenu(e) {
+      const el = e.target instanceof Element ? e.target : e.target?.parentElement
+      if (el?.closest(CONTEXT_ALLOW_SELECTOR) || el?.isContentEditable) return
+      e.preventDefault()
+    }
+    document.addEventListener('contextmenu', handleContextMenu)
+    return () => document.removeEventListener('contextmenu', handleContextMenu)
+  }, [])
+
   const params = new URLSearchParams(location.search)
   const code = (params.get('room') || '').trim().toUpperCase()
   const isDebug = location.pathname === '/debug' || params.get('debug') === '1'

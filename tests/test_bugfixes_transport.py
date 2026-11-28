@@ -252,7 +252,7 @@ def test_lobby_leave_clear_session_and_expiry():
     assert "Binh" not in room.sessions
 
 
-def test_active_game_disconnected_seat_requires_token():
+def test_active_game_player_rejoin_and_active_hijack_rejected():
     room = Room("ACT1")
     ws_a = StubSocket()
     ws_b = StubSocket()
@@ -261,13 +261,20 @@ def test_active_game_disconnected_seat_requires_token():
     room.game = Game(["An", "Binh"])
     room.game.start()
 
-    assert room.leave("An", ws_a) is True
+    # Ghế đang online thì vẫn chặn chiếm kết nối khi thiếu token
     with pytest.raises(SessionError) as exc_info:
         room.register("An", StubSocket())
-    assert exc_info.value.code == "SESSION_INVALID"
+    assert exc_info.value.code == "NAME_TAKEN"
 
-    # Chủ token cũ vẫn kết nối lại được
-    assert room.register("An", StubSocket(), tok_a) == tok_a
+    # Issue #17: người chơi trong ván bị mất kết nối (mất sessionStorage) vẫn nối lại được
+    assert room.leave("An", ws_a) is True
+    tok_a2 = room.register("An", StubSocket())
+    assert tok_a2 and tok_a2 != tok_a
+
+    # Chủ token hiện tại vẫn kết nối lại giữ nguyên token
+    ws_a3 = StubSocket()
+    assert room.leave("An", room.conns["An"]) is True
+    assert room.register("An", ws_a3, tok_a2) == tok_a2
 
 
 def test_prune_cancels_nope_timer_and_uses_empty_lobby_ttl():
@@ -779,3 +786,280 @@ def test_set_avatar_syncs_in_lobby_and_game_and_validates():
         }
 
     asyncio.run(flow())
+
+
+def test_spectator_join_privacy_actions_cap_and_promotion():
+    from server.engine.cards import Card
+    from server.rooms import MAX_SPECTATORS
+
+    room = Room("SPC1")
+    ws_a = StubSocket()
+    ws_b = StubSocket()
+    tok_a = room.register("An", ws_a)
+    room.register("Binh", ws_b)
+
+    async def flow():
+        await room.handle("An", {"action": "start"}, ws_a, tok_a)
+        g = room.game
+        assert g is not None
+        first = g.order[0]
+        g._say("bí mật riêng tư", private=first)
+        g._say("sự kiện công khai")
+        g.private_peeks[first] = [{"id": "peek.0", "type": "skip", "variant": 0}]
+        bomb = g.debug_put_deck("explodingkitten", index=0)
+        g.clairvoyance_targets[first] = {bomb.id}
+        assert room._view_for(first)["you"].get("bomb_positions")
+        g.pending = {
+            "kind": "reorder",
+            "owner": first,
+            "data": {"cards": [{"id": "c1", "type": "skip", "variant": 0}], "reason": "alter"},
+        }
+
+        ws_s = StubSocket()
+        tok_s = await room.join("Khach", ws_s)
+        assert "Khach" in room.spectators
+        assert room.spectator_count() == 1
+        assert room.player_count() == 2
+
+        # Trùng tên khán giả đang hoạt động vẫn bị từ chối
+        with pytest.raises(SessionError) as dup_exc:
+            await room.join("Khach", StubSocket())
+        assert dup_exc.value.code == "NAME_TAKEN"
+
+        view = room._view_for("Khach")
+        assert view["you"]["spectator"] is True
+        assert view["you"]["alive"] is False
+        assert view["you"]["hand"] == []
+        assert view["you"]["hand_count"] == 0
+        assert "peek" not in view["you"]
+        assert "bomb_positions" not in view["you"]
+        assert view["spectator_count"] == 1
+        assert "bí mật riêng tư" not in view["log"]
+        assert "sự kiện công khai" in view["log"]
+        assert all(e["text"] != "bí mật riêng tư" for e in view["log_entries"])
+        assert view["pending"]["owner"] == first
+        assert "cards" not in view["pending"]["data"]
+
+        blocked_actions = [
+            {"action": "play", "card_id": "x"},
+            {"action": "combo", "combo": "pair", "card_ids": ["a", "b"]},
+            {"action": "draw"},
+            {"action": "respond", "payload": {}},
+            {"action": "nope"},
+            {"action": "pass_nope"},
+            {"action": "play_now", "card_id": "x"},
+            {"action": "start"},
+            {"action": "vote_desk", "desk": "original"},
+            {"action": "set_avatar", "avatar": {"fur": "ginger"}},
+            {"action": "assets_ready"},
+            {"action": "rematch"},
+            {"action": "return_lobby"},
+        ]
+        for cmd in blocked_actions:
+            with pytest.raises(GameError, match="khán giả"):
+                await room.handle("Khach", cmd, ws_s, tok_s)
+
+        # Khán giả được phép rời phòng ngay cả khi ván đang chơi
+        await room.handle("Khach", {"action": "leave"}, ws_s, tok_s)
+        await asyncio.sleep(0)
+        assert "Khach" not in room.conns
+        assert "Khach" not in room.spectators
+        assert room.spectator_count() == 0
+
+        # Kiểm tra giới hạn MAX_SPECTATORS = 20
+        spec_socks = []
+        for i in range(MAX_SPECTATORS):
+            sw = StubSocket()
+            await room.join(f"Spec{i}", sw)
+            spec_socks.append((f"Spec{i}", sw))
+        with pytest.raises(RoomFullError):
+            await room.join("SpecOverflow", StubSocket())
+
+        # Dọn bớt chỉ giữ 1 khán giả để test lên làm người chơi khi return_lobby
+        for sname, sw in spec_socks[1:]:
+            room.leave(sname, sw)
+        assert room.spectator_count() == 1
+
+        g.pending = None
+        g.phase = "ended"
+        g.winner = "An"
+        await room.handle("An", {"action": "return_lobby"}, ws_a, tok_a)
+        assert room.game is None
+        assert room.spectator_count() == 0
+        lobby_names = {p["name"] for p in room._view_for("Spec0")["players"]}
+        assert lobby_names == {"An", "Binh", "Spec0"}
+
+    asyncio.run(flow())
+
+
+def test_turn_timer_autodraw_reset_and_pause(monkeypatch):
+    from server.engine.cards import Card
+    import server.rooms as rooms_mod
+
+    monkeypatch.setattr(rooms_mod, "TURN_SECONDS", 0.08)
+
+    room = Room("TMR1")
+    ws_a = StubSocket()
+    ws_b = StubSocket()
+    tok_a = room.register("An", ws_a)
+    tok_b = room.register("Binh", ws_b)
+
+    async def flow():
+        await room.handle("An", {"action": "start"}, ws_a, tok_a)
+        g = room.game
+        assert g is not None
+        g.deck.cards = [
+            Card(id=f"safe.{i}", type="cat", variant=0) for i in range(6)
+        ]
+        actor = g.order[g.turn_index]
+        tok_actor = tok_a if actor == "An" else tok_b
+        ws_actor = ws_a if actor == "An" else ws_b
+
+        v1 = room._view_for(actor)
+        assert v1["turn_timer"] is not None
+        assert v1["turn_timer"]["actor"] == actor
+        first_ends = v1["turn_timer"]["ends_ms"]
+
+        # Đánh lá standby defuse (godcat as defuse) -> không nope/pending, reset deadline
+        await asyncio.sleep(0.03)
+        godcat = Card(id="gc.0", type="godcat", variant=0)
+        g.players[actor].hand.append(godcat)
+        await room.handle(actor, {"action": "play", "card_id": godcat.id, "as_type": "defuse"}, ws_actor, tok_actor)
+        v2 = room._view_for(actor)
+        assert v2["turn_timer"] is not None
+        assert v2["turn_timer"]["ends_ms"] >= first_ends
+
+        # Pending mở ra -> tạm dừng timer (turn_timer=None)
+        g.pending = {"kind": "yes_no", "owner": actor, "data": {"question": "?"}}
+        await room._after_action_locked(reset_turn_timer=True)
+        assert room._view_for(actor)["turn_timer"] is None
+        assert room._turn_timer_task is None
+
+        # Xóa pending và kích hoạt lại -> chờ hết giờ tự động rút bài và đổi lượt
+        g.pending = None
+        await room._after_action_locked(reset_turn_timer=True)
+        hand_before = len(g.players[actor].hand)
+        await asyncio.sleep(0.14)
+        assert len(g.players[actor].hand) == hand_before + 1
+        assert g.order[g.turn_index] != actor
+        assert any("hết giờ" in line.lower() for line in g.log)
+
+        room._cancel_timers()
+
+    asyncio.run(flow())
+
+
+def test_preload_loading_barrier_and_timeout(monkeypatch):
+    import server.rooms as rooms_mod
+    from server.rooms import desk_image_urls
+
+    urls = desk_image_urls("original")
+    assert urls[0] == "/backside.jpg"
+    assert any(u.startswith("/static/cards/explodingkitten/") for u in urls)
+    assert all(
+        u == "/backside.jpg" or client.get(u).status_code == 200
+        for u in urls[:6]
+    )
+    img_resp = client.get("/static/cards/skip/0.jpg")
+    assert img_resp.status_code == 200
+    assert "max-age=" in img_resp.headers.get("cache-control", "")
+
+    desks_img_resp = client.get("/api/desks/original/images")
+    assert desks_img_resp.status_code == 200
+    assert desks_img_resp.json()["desk"] == "original"
+    assert "/backside.jpg" in desks_img_resp.json()["images"]
+
+    room = Room("LOD1")
+    ws_a = StubSocket()
+    ws_b = StubSocket()
+    tok_a = room.register("An", ws_a)
+    tok_b = room.register("Binh", ws_b)
+
+    async def flow():
+        await room.handle("An", {"action": "vote_desk", "desk": "original"}, ws_a, tok_a)
+        await room.handle("An", {"action": "start", "preload": True}, ws_a, tok_a)
+        assert room.game is None
+        assert room.current_phase() == "loading"
+        va = room._view_for("An")
+        assert va["phase"] == "loading"
+        assert va["loading"]["desk"] == "original"
+        assert va["loading"]["players"] == ["An", "Binh"]
+        assert va["loading"]["ready"] == []
+        assert va["loading"]["total"] == 2
+
+        # Khán giả vào trong lúc đang loading không làm kẹt barrier
+        ws_s = StubSocket()
+        tok_s = await room.join("Spec", ws_s)
+        assert room._view_for("Spec")["you"]["spectator"] is True
+        with pytest.raises(GameError, match="khán giả"):
+            await room.handle("Spec", {"action": "assets_ready"}, ws_s, tok_s)
+
+        await room.handle("An", {"action": "assets_ready"}, ws_a, tok_a)
+        assert room.current_phase() == "loading"
+        assert room._view_for("An")["loading"]["ready"] == ["An"]
+
+        await room.handle("Binh", {"action": "assets_ready"}, ws_b, tok_b)
+        assert room.current_phase() == "playing"
+        assert room.game is not None
+        assert room.game.desk_name == "original"
+        assert room._view_for("Spec")["you"]["spectator"] is True
+
+        # Timeout cũng tự động vào game
+        room.game.phase = "ended"
+        room.game.winner = "An"
+        monkeypatch.setattr(rooms_mod, "LOADING_TIMEOUT_SECONDS", 0.05)
+        await room.handle("An", {"action": "rematch", "preload": True}, ws_a, tok_a)
+        assert room.current_phase() == "loading"
+        await asyncio.sleep(0.12)
+        assert room.current_phase() == "playing"
+        assert room.game is not None
+        room._cancel_timers()
+
+    asyncio.run(flow())
+
+
+def test_rematch_reallocates_real_code_and_preserves_display_code():
+    from server.rooms import RoomManager
+
+    mgr = RoomManager()
+    display_code = mgr.create()
+    room = mgr.get(display_code)
+    assert room is not None
+    assert room.display_code == display_code
+    assert room.real_code == display_code
+    assert mgr.aliases[display_code] == display_code
+
+    ws_a = StubSocket()
+    ws_b = StubSocket()
+    tok_a = room.register("An", ws_a)
+    room.register("Binh", ws_b)
+
+    async def flow():
+        await room.handle("An", {"action": "start"}, ws_a, tok_a)
+        assert room.game is not None
+        room.game.phase = "ended"
+        room.game.winner = "An"
+
+        await room.handle("An", {"action": "rematch"}, ws_a, tok_a)
+        new_real = room.real_code
+        assert room.display_code == display_code
+        assert new_real != display_code
+        assert mgr.aliases[display_code] == new_real
+        assert mgr.get(display_code) is room
+        assert mgr.get(new_real) is room
+        assert display_code not in mgr.rooms
+        assert mgr.rooms[new_real] is room
+
+        view = room._view_for("An")
+        assert view["display_code"] == display_code
+        assert view["real_code"] == new_real
+        room._cancel_timers()
+
+    asyncio.run(flow())
+
+    # Prune dọn cả rooms lẫn aliases
+    room.conns.clear()
+    room.last_active -= 5000
+    mgr.prune()
+    assert mgr.get(display_code) is None
+    assert display_code not in mgr.aliases

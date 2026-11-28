@@ -126,6 +126,26 @@ function epicSfxForCard(cardType) {
   return 'epic'
 }
 
+function getSessionToken(roomCode, playerName) {
+  const k = sessionKey(roomCode, playerName)
+  const s = store.get(k)
+  if (s) return s
+  try { return localStorage.getItem(k) || '' } catch { return '' }
+}
+
+function setSessionToken(roomCode, playerName, token) {
+  if (!token) return
+  const k = sessionKey(roomCode, playerName)
+  store.set(k, token)
+  try { localStorage.setItem(k, token) } catch { /* bị chặn — bỏ qua */ }
+}
+
+function removeSessionToken(roomCode, playerName) {
+  const k = sessionKey(roomCode, playerName)
+  store.remove(k)
+  try { localStorage.removeItem(k) } catch { /* bị chặn — bỏ qua */ }
+}
+
 function copyToClipboard(text) {
   if (navigator.clipboard?.writeText) {
     return navigator.clipboard.writeText(text)
@@ -185,6 +205,9 @@ export default function Room({ code }) {
   const [myAvatar, setMyAvatar] = useState(() => loadSavedAvatar(
     (new URLSearchParams(location.search).get('name') || store.get('ek_name')).trim(),
   ))
+  const [turnBanner, setTurnBanner] = useState(null)
+  const [turnSecLeft, setTurnSecLeft] = useState(null)
+  const [loadProgress, setLoadProgress] = useState({ loaded: 0, total: 0, done: false })
   const [muted, setMutedState] = useState(() => isMuted())
   const [viewportW, setViewportW] = useState(() => (typeof window !== 'undefined' ? window.innerWidth : 1280))
 
@@ -202,7 +225,11 @@ export default function Room({ code }) {
   const prevHandRef = useRef(null)
   const prevRevealedRef = useRef(null)
   const prevPhaseRef = useRef(null)
-  const prevTurnRef = useRef(null)
+  const prevTurnKeyRef = useRef(null)
+  const turnBannerTimerRef = useRef(null)
+  const turnTimerAnchorRef = useRef(null)
+  const lastTickKeyRef = useRef('')
+  const loadingSentRef = useRef(false)
   const prevNopeKeyRef = useRef('')
   const prevGraveTopIdRef = useRef(undefined)
   const slamTimerRef = useRef(null)
@@ -268,6 +295,7 @@ export default function Room({ code }) {
     clearTimeout(shakeTimerRef.current)
     clearTimeout(infoToastTimerRef.current)
     clearTimeout(deckLitTimerRef.current)
+    clearTimeout(turnBannerTimerRef.current)
     dragCleanupRef.current?.()
   }, [])
 
@@ -308,7 +336,7 @@ export default function Room({ code }) {
       if (closed) return
       lastServerErrRef.current = { message: '', code: '' }
       setConnState('connecting')
-      const session = store.get(sessionKey(code, name))
+      const session = getSessionToken(code, name)
       const ws = new WebSocket(wsUrl(code, name, session))
       wsRef.current = ws
 
@@ -324,7 +352,12 @@ export default function Room({ code }) {
         if (msg.type === 'state') {
           const nextView = msg.view
           const token = nextView?.you?.session
-          if (token) store.set(sessionKey(code, name), token)
+          if (token) {
+            setSessionToken(code, name, token)
+            if (nextView.display_code && nextView.display_code !== code) {
+              setSessionToken(nextView.display_code, name, token)
+            }
+          }
           lastServerErrRef.current = { message: '', code: '' }
 
           // Dò dòng log mới theo log_entries.seq (fallback nội dung dòng cuối nếu thiếu log_entries)
@@ -349,7 +382,7 @@ export default function Room({ code }) {
           let triggeredBoom = null
           if ('last_boom' in nextView) {
             const lb = nextView.last_boom
-            if (nextView.phase === 'lobby' || !lb) {
+            if (nextView.phase === 'lobby' || nextView.phase === 'loading' || !lb) {
               seenBoomSeqRef.current = 0
             } else if (seenBoomSeqRef.current === null) {
               // Kết nối lần đầu / reconnect vào ván cũ: chỉ ghi nhận seq hiện tại, không phát lại nổ cũ
@@ -381,6 +414,23 @@ export default function Room({ code }) {
             }
           }
 
+          const prevPhase = prevPhaseRef.current
+          if (nextView.phase === 'lobby' || nextView.phase === 'loading' || (prevPhase === 'ended' && nextView.phase !== 'ended')) {
+            clearTimeout(boomTimerRef.current)
+            setBoom(null)
+            clearTimeout(slamTimerRef.current)
+            setSlam(null)
+            clearTimeout(transferTimerRef.current)
+            setTransferFx(null)
+            actionQueueRef.current = []
+            clearTimeout(actionTimerRef.current)
+            setActionFx(null)
+            clearTimeout(epicTimerRef.current)
+            setEpicFx(null)
+            clearTimeout(shakeTimerRef.current)
+            setShake(false)
+          }
+
           if (triggeredBoom) {
             const { who, variant } = triggeredBoom
             setBoom({ who, variant, key: Date.now() })
@@ -392,20 +442,64 @@ export default function Room({ code }) {
             shakeTimerRef.current = setTimeout(() => setShake(false), 650)
           }
 
-          // Âm thanh đổi pha / lượt / cửa sổ Nope
-          if (prevPhaseRef.current === 'playing' && nextView.phase === 'ended') {
+          // Âm thanh đổi pha / lượt / banner lượt giữa bàn / cửa sổ Nope
+          if (prevPhase === 'playing' && nextView.phase === 'ended') {
             playSfx('win')
             setEndedDismissed(false)
-          } else if (prevPhaseRef.current === 'ended' && nextView.phase !== 'ended') {
+          } else if (prevPhase === 'ended' && nextView.phase !== 'ended') {
             setEndedDismissed(false)
           }
           prevPhaseRef.current = nextView.phase
 
-          const nextTurn = nextView.phase === 'playing' ? nextView.turn?.current : null
-          if (nextTurn === name && prevTurnRef.current && prevTurnRef.current !== name) {
-            playSfx('turn')
+          const nextIsSpectator = !!nextView.you?.spectator
+          const nextTurn = nextView.phase === 'playing' ? (nextView.turn?.current || '') : ''
+          const nextTurnsLeft = nextView.turn?.turns_left ?? 1
+          const nextTurnKey = nextTurn ? `${nextTurn}:${nextTurnsLeft}` : ''
+          const enteredPlaying = prevPhase === 'lobby' || prevPhase === 'loading' || prevPhase === 'ended'
+
+          if (nextView.phase === 'playing' && nextTurn) {
+            const turnChanged = prevTurnKeyRef.current !== null && prevTurnKeyRef.current !== nextTurnKey
+            if (enteredPlaying || turnChanged) {
+              const isMine = !nextIsSpectator && nextTurn === name && !!nextView.you?.alive
+              setTurnBanner({
+                key: `${nextTurnKey}:${Date.now()}`,
+                actor: nextTurn,
+                isMine,
+                turnsLeft: nextTurnsLeft,
+              })
+              clearTimeout(turnBannerTimerRef.current)
+              turnBannerTimerRef.current = setTimeout(() => setTurnBanner(null), 1550)
+              if (isMine) {
+                playSfx('turn')
+              }
+            }
+            prevTurnKeyRef.current = nextTurnKey
+          } else {
+            prevTurnKeyRef.current = ''
+            clearTimeout(turnBannerTimerRef.current)
+            setTurnBanner(null)
           }
-          prevTurnRef.current = nextTurn
+
+          const tt = nextView.phase === 'playing' ? nextView.turn_timer : null
+          if (tt && typeof tt === 'object') {
+            const remMs = typeof tt.remaining_ms === 'number'
+              ? Math.max(0, tt.remaining_ms)
+              : typeof tt.ends_ms === 'number'
+                ? Math.max(0, tt.ends_ms - (typeof tt.server_now_ms === 'number' ? tt.server_now_ms : Date.now()))
+                : 0
+            const timerKey = `${tt.actor || ''}:${tt.ends_ms || ''}:${nextTurnKey}`
+            turnTimerAnchorRef.current = {
+              key: timerKey,
+              actor: tt.actor || nextTurn,
+              localEndsAt: Date.now() + remMs,
+              durationMs: tt.duration_ms || 30000,
+            }
+            setTurnSecLeft(Math.ceil(remMs / 1000))
+          } else {
+            turnTimerAnchorRef.current = null
+            setTurnSecLeft(null)
+            lastTickKeyRef.current = ''
+          }
 
           const nw = nextView.nope_window
           const nwKey = nw ? `${nw.actor}:${nw.card?.id || ''}:${nw.stacked ?? 0}` : ''
@@ -417,7 +511,7 @@ export default function Room({ code }) {
           // Bàn tay đập thẻ xuống chồng bài bỏ khi xuất hiện lá mới ở đỉnh grave
           const nextTop = nextView.grave_top?.[0] || null
           const nextTopId = nextTop?.id ?? null
-          if (nextView.phase === 'lobby') {
+          if (nextView.phase === 'lobby' || nextView.phase === 'loading') {
             prevGraveTopIdRef.current = null
           } else if (prevGraveTopIdRef.current === undefined) {
             prevGraveTopIdRef.current = nextTopId
@@ -442,7 +536,7 @@ export default function Room({ code }) {
           // Structured FX events feed (rút bài, chuyển bài, đặt vào deck, action cutscenes)
           const fxList = Array.isArray(nextView.fx_events) ? nextView.fx_events : []
           const lastEv = fxList.length > 0 ? fxList[fxList.length - 1] : null
-          if (nextView.phase === 'lobby') {
+          if (nextView.phase === 'lobby' || nextView.phase === 'loading') {
             seenFxSeqRef.current = 0
             actionQueueRef.current = []
             clearTimeout(actionTimerRef.current)
@@ -601,7 +695,7 @@ export default function Room({ code }) {
 
           // Nếu tên bị trùng khi đang vào qua link ?room=CODE -> cho đổi tên ngay tại chỗ
           if (!hasViewRef.current && isNameTaken) {
-            store.remove(sessionKey(code, name))
+            removeSessionToken(code, name)
             setNameDraft(name)
             setNameJoinErr(finalMsg)
             setError('')
@@ -636,9 +730,10 @@ export default function Room({ code }) {
       }
     }
 
-    connect()
+    const initTimer = setTimeout(connect, 0)
   return () => {
       closed = true
+      clearTimeout(initTimer)
       clearTimeout(timer)
       wsRef.current?.close()
     }
@@ -749,11 +844,12 @@ export default function Room({ code }) {
       lastAvatarSyncRef.current = ''
       return
     }
+    if (!view || view.you?.spectator) return
     const sig = JSON.stringify(myAvatar)
     if (sig === lastAvatarSyncRef.current) return
     lastAvatarSyncRef.current = sig
     wsRef.current.send(JSON.stringify({ action: 'set_avatar', avatar: myAvatar }))
-  }, [connState, myAvatar])
+  }, [connState, myAvatar, view?.you?.spectator, !!view])
 
   const handleSaveAvatar = useCallback((next) => {
     const clean = saveAvatar(next)
@@ -766,8 +862,137 @@ export default function Room({ code }) {
     listDeskDetails().then(setDesks).catch(() => {})
   }, [])
 
+  // Issue #6: đếm ngược turn_timer mượt + tiếng tick ở 3, 2, 1 giây cuối
+  const turnTimerKey = view?.phase === 'playing' && view?.turn_timer
+    ? `${view.turn_timer.actor || ''}:${view.turn_timer.ends_ms || ''}:${view.turn?.current || ''}:${view.turn?.turns_left ?? 1}`
+    : ''
+
+  useEffect(() => {
+    if (!turnTimerKey || view?.phase !== 'playing' || !view?.turn_timer) {
+      setTurnSecLeft(null)
+      return undefined
+    }
+    const tick = () => {
+      const anchor = turnTimerAnchorRef.current
+      if (!anchor) {
+        setTurnSecLeft(null)
+        return
+      }
+      const remMs = Math.max(0, anchor.localEndsAt - Date.now())
+      const sec = Math.ceil(remMs / 1000)
+      setTurnSecLeft(sec)
+      if (sec >= 1 && sec <= 3) {
+        const dedupeKey = `${anchor.key}:${sec}`
+        if (lastTickKeyRef.current !== dedupeKey) {
+          lastTickKeyRef.current = dedupeKey
+          playSfx('tick')
+        }
+      }
+    }
+    tick()
+    const id = setInterval(tick, 120)
+    return () => clearInterval(id)
+  }, [turnTimerKey, view?.phase, !!view?.turn_timer])
+
+  // Issue #12: preload đồng bộ toàn bộ ảnh bộ bài trước khi vào ván
+  const loadingImagesKey = view?.phase === 'loading'
+    ? `${view.loading?.desk || ''}:${(view.loading?.images || []).join('|')}`
+    : ''
+  const alreadyLoadingReady = Boolean(
+    view?.phase === 'loading' && Array.isArray(view.loading?.ready) && view.loading.ready.includes(name),
+  )
+
+  useEffect(() => {
+    if (!connected) {
+      loadingSentRef.current = false
+    }
+  }, [connected])
+
+  useEffect(() => {
+    if (view?.phase !== 'loading') {
+      loadingSentRef.current = false
+      setLoadProgress({ loaded: 0, total: 0, done: false })
+      return undefined
+    }
+
+    loadingSentRef.current = false
+    const rawImages = Array.isArray(view.loading?.images) ? view.loading.images : []
+    const urls = Array.from(new Set(rawImages.filter(Boolean)))
+    const total = urls.length
+
+    if (total === 0) {
+      setLoadProgress({ loaded: 0, total: 0, done: true })
+      return undefined
+    }
+
+    let cancelled = false
+    let completed = 0
+    let finished = false
+    setLoadProgress({ loaded: 0, total, done: false })
+
+    const finishAll = () => {
+      if (cancelled || finished) return
+      finished = true
+      setLoadProgress({ loaded: total, total, done: true })
+    }
+
+    const markOne = () => {
+      if (cancelled || finished) return
+      completed += 1
+      setLoadProgress({ loaded: Math.min(completed, total), total, done: completed >= total })
+      if (completed >= total) {
+        finishAll()
+      }
+    }
+
+    const safetyTimer = setTimeout(finishAll, 10000)
+
+    for (const src of urls) {
+      const img = new Image()
+      img.decoding = 'async'
+      let settled = false
+      const settle = () => {
+        if (settled) return
+        settled = true
+        markOne()
+      }
+      img.onload = () => {
+        if (typeof img.decode === 'function') {
+          img.decode().then(settle, settle)
+        } else {
+          settle()
+        }
+      }
+      img.onerror = settle
+      img.src = src
+      if (img.complete) {
+        if (typeof img.decode === 'function') {
+          img.decode().then(settle, settle)
+        } else {
+          settle()
+        }
+      }
+    }
+
+    return () => {
+      cancelled = true
+      clearTimeout(safetyTimer)
+    }
+  }, [view?.phase, loadingImagesKey])
+
+  useEffect(() => {
+    if (view?.phase !== 'loading' || !loadProgress.done) return
+    if (view?.you?.spectator || !connected || alreadyLoadingReady || loadingSentRef.current) return
+    if (send({ action: 'assets_ready' })) {
+      loadingSentRef.current = true
+    }
+  }, [view?.phase, loadProgress.done, view?.you?.spectator, connected, alreadyLoadingReady, send])
+
+  const isSpectator = !!me?.spectator
+  const roomCodeDisplay = view?.display_code || code
+
   // Hết lượt: giữ class sáng deck thêm ~450ms để CSS fade-out mượt
-  const canDrawEarly = connected && !!view && view.turn?.current === name
+  const canDrawEarly = connected && !!view && !isSpectator && view.turn?.current === name
     && view.you.alive && view.phase === 'playing' && !view.pending && !view.nope_window
   useEffect(() => {
     if (canDrawEarly) {
@@ -783,8 +1008,8 @@ export default function Room({ code }) {
     return undefined
   }, [canDrawEarly, deckLit])
 
-  const isMyTurn = !!view && view.turn?.current === name && !!me?.alive && view.phase === 'playing'
-  const myPending = view?.pending && view.pending.owner === name ? view.pending : null
+  const isMyTurn = !isSpectator && !!view && view.turn?.current === name && !!me?.alive && view.phase === 'playing'
+  const myPending = !isSpectator && view?.pending && view.pending.owner === name ? view.pending : null
   const canDraw = connected && isMyTurn && !view?.pending && !view?.nope_window
   const deckGlow = canDraw || deckLit
   const givePending = !!myPending && myPending.kind === 'pick_card'
@@ -895,7 +1120,7 @@ export default function Room({ code }) {
         if (selected.length > 0) setSelected([])
         return
       }
-      if (inField || zoom || graveList || godcatCard) return
+      if (inField || zoom || graveList || godcatCard || isSpectator) return
 
       const key = e.key.toLowerCase()
       const nw = view?.nope_window
@@ -928,7 +1153,7 @@ export default function Room({ code }) {
     window.addEventListener('keydown', onKeyDown)
   return () => window.removeEventListener('keydown', onKeyDown)
   }, [
-    zoom, graveList, godcatCard, selected.length, view?.nope_window, connected,
+    zoom, graveList, godcatCard, isSpectator, selected.length, view?.nope_window, connected,
     me, name, canDraw, selectedCardList.length, givePending, send, tryPlaySelected,
   ])
 
@@ -944,8 +1169,9 @@ export default function Room({ code }) {
 
   function handleLeaveRoom() {
     leavingRef.current = true
-    if ((view?.phase === 'lobby' || view?.phase === 'ended') && connected && wsRef.current?.readyState === 1) {
-      store.remove(sessionKey(code, name))
+    if ((isSpectator || view?.phase === 'lobby' || view?.phase === 'ended') && connected && wsRef.current?.readyState === 1) {
+      removeSessionToken(code, name)
+      if (roomCodeDisplay !== code) removeSessionToken(roomCodeDisplay, name)
       try {
         wsRef.current.send(JSON.stringify({ action: 'leave' }))
       } catch { /* bỏ qua */ }
@@ -956,13 +1182,13 @@ export default function Room({ code }) {
   }
 
   function handleCopyCode() {
-    copyToClipboard(code)
-      .then(() => showInfo(`Đã sao chép mã phòng ${code}`))
-      .catch(() => showInfo(`Mã phòng: ${code}`))
+    copyToClipboard(roomCodeDisplay)
+      .then(() => showInfo(`Đã sao chép mã phòng ${roomCodeDisplay}`))
+      .catch(() => showInfo(`Mã phòng: ${roomCodeDisplay}`))
   }
 
   function handleCopyLink() {
-    const url = `${location.origin}/?room=${encodeURIComponent(code)}`
+    const url = `${location.origin}/?room=${encodeURIComponent(roomCodeDisplay)}`
     copyToClipboard(url)
       .then(() => showInfo('Đã sao chép link mời vào phòng!'))
       .catch(() => showInfo(url))
@@ -1215,7 +1441,7 @@ export default function Room({ code }) {
             title="Bấm để sao chép mã phòng"
             onClick={handleCopyCode}
           >
-            {code}
+            {roomCodeDisplay}
           </button>
           <button
             type="button"
@@ -1236,7 +1462,7 @@ export default function Room({ code }) {
           towerWearer={view.tower_wearer}
           catalog={catalog}
           onInspectCard={setZoom}
-          onEditAvatar={() => setCatModalOpen(true)}
+          onEditAvatar={isSpectator ? null : () => setCatModalOpen(true)}
         />
 
         <div className="topbar-right">
@@ -1265,7 +1491,7 @@ export default function Room({ code }) {
               className="icon-btn debug-entry-btn"
               title="Mở Debug Studio (tab mới)"
               aria-label="Mở Debug Studio"
-              onClick={() => window.open(`/?debug=1&room=${encodeURIComponent(code)}`, '_blank', 'noopener')}
+              onClick={() => window.open(`/?debug=1&room=${encodeURIComponent(roomCodeDisplay)}`, '_blank', 'noopener')}
             >
               <UiSvg name="wrench" size={16} />
             </button>
@@ -1279,7 +1505,7 @@ export default function Room({ code }) {
           >
             <UiSvg name={muted ? 'sound-off' : 'sound-on'} size={16} />
           </button>
-          {view.phase !== 'lobby' && (
+          {view.phase !== 'lobby' && view.phase !== 'loading' && (
             <>
               <button
                 type="button"
@@ -1316,21 +1542,81 @@ export default function Room({ code }) {
         </div>
       )}
 
+      {isSpectator && view.phase !== 'lobby' && (
+        <div className="spectator-banner" role="status" aria-live="polite">
+          <span className="spectator-banner-main">
+            <span className="spectator-pill-tag">Khán giả</span>
+            <span>Chế độ khán giả — Đang xem ván (sẽ tham gia ở ván sau)</span>
+          </span>
+          {(view.spectator_count ?? 0) > 0 && (
+            <span className="spectator-count-tag">{view.spectator_count} người đang xem</span>
+          )}
+        </div>
+      )}
+
       {view.phase === 'lobby' && (
         <LobbyPanel
-          code={code}
+          code={roomCodeDisplay}
           players={view.players}
           desks={desks}
           votes={view.votes}
           name={name}
           connected={connected}
           onVoteDesk={(desk) => send({ action: 'vote_desk', desk })}
-          onStart={() => send({ action: 'start' })}
+          onStart={() => send({ action: 'start', preload: true })}
           onCopyCode={handleCopyCode}
           onCopyLink={handleCopyLink}
           onEditAvatar={() => setCatModalOpen(true)}
         />
       )}
+
+      {view.phase === 'loading' && (() => {
+        const loadingPlayers = Array.isArray(view.loading?.players) ? view.loading.players : []
+        const loadingReadySet = new Set(Array.isArray(view.loading?.ready) ? view.loading.ready : [])
+        const deskMeta = desks.find((d) => d.id === view.loading?.desk)
+        const total = loadProgress.total
+        const loaded = Math.min(loadProgress.loaded, total)
+        const pct = total > 0 ? Math.round((loaded / total) * 100) : 100
+        return (
+          <section className="loading-stage" aria-label="Đang chuẩn bị ván đấu">
+            <div className="loading-card" role="status" aria-live="polite">
+              <div className="loading-card-head">
+                <span className="lobby-eyebrow">Phòng {roomCodeDisplay} · Chuẩn bị bộ bài</span>
+                <h2>Đang tải bộ bài {deskMeta?.title || view.loading?.desk || ''}…</h2>
+                <p>
+                  {isSpectator
+                    ? 'Các người chơi đang tải hình ảnh trước khi bắt đầu ván mới.'
+                    : loadProgress.done
+                      ? 'Đã tải xong — đang chờ người chơi khác sẵn sàng…'
+                      : 'Đang nạp trước hình ảnh thẻ bài để chơi mượt không giật khung.'}
+                </p>
+              </div>
+              <div className="loading-progress-wrap">
+                <div className="loading-progress-meta">
+                  <span>{total > 0 ? `Đã tải ${loaded} / ${total} ảnh` : 'Sẵn sàng'}</span>
+                  <span className="loading-progress-pct">{pct}%</span>
+                </div>
+                <div className="loading-progress-track" aria-hidden="true">
+                  <div className="loading-progress-fill" style={{ width: `${pct}%` }} />
+                </div>
+              </div>
+              {loadingPlayers.length > 0 && (
+                <div className="loading-players" aria-label="Trạng thái người chơi">
+                  {loadingPlayers.map((pn) => {
+                    const ready = loadingReadySet.has(pn)
+                    return (
+                      <span key={pn} className={`loading-player-pill ${ready ? 'ready' : ''}`}>
+                        <i className="loading-player-dot" aria-hidden="true" />
+                        {pn}{ready ? ' · Sẵn sàng' : ' · Đang tải…'}
+                      </span>
+                    )
+                  })}
+                </div>
+              )}
+            </div>
+          </section>
+        )
+      })()}
 
       {view.phase === 'ended' && !endedDismissed && (
         <div className="zoom-overlay ended-overlay" role="dialog" aria-modal="true" aria-label="Kết thúc ván đấu">
@@ -1340,26 +1626,32 @@ export default function Room({ code }) {
             </div>
             <h2>{view.winner ? `${view.winner} THẮNG!` : 'Ván đấu kết thúc!'}</h2>
             <p className="ended-sub">
-              {view.winner === name
-                ? 'Chúc mừng bạn sống sót cuối cùng!'
-                : 'Chọn chơi ván mới ngay hoặc quay về sảnh để đổi bộ bài.'}
+              {isSpectator
+                ? 'Bạn đang xem với tư cách khán giả — chờ người chơi bắt đầu ván mới để cùng tham gia.'
+                : view.winner === name
+                  ? 'Chúc mừng bạn sống sót cuối cùng!'
+                  : 'Chọn chơi ván mới ngay hoặc quay về sảnh để đổi bộ bài.'}
             </p>
             <div className="ended-actions">
-              <button
-                type="button"
-                className="primary"
-                disabled={!connected}
-                onClick={() => send({ action: 'rematch' })}
-              >
-                ↻ Chơi lại
-              </button>
-              <button
-                type="button"
-                disabled={!connected}
-                onClick={() => send({ action: 'return_lobby' })}
-              >
-                ← Về sảnh
-              </button>
+              {!isSpectator && (
+                <>
+                  <button
+                    type="button"
+                    className="primary"
+                    disabled={!connected}
+                    onClick={() => send({ action: 'rematch', preload: true })}
+                  >
+                    ↻ Chơi lại
+                  </button>
+                  <button
+                    type="button"
+                    disabled={!connected}
+                    onClick={() => send({ action: 'return_lobby' })}
+                  >
+                    ← Về sảnh
+                  </button>
+                </>
+              )}
               <button type="button" onClick={() => setEndedDismissed(true)}>
                 <RealIcon name="peek" size={16} /> Xem bàn
               </button>
@@ -1384,7 +1676,7 @@ export default function Room({ code }) {
         window={view.nope_window}
         name={name}
         send={send}
-        alive={me.alive}
+        alive={!!me.alive && !isSpectator}
         hasNope={me.blind || (me.hand || []).some((c) => c.type === 'nope')}
         isBlind={!!me.blind}
         errorNonce={errorNonce}
@@ -1393,13 +1685,57 @@ export default function Room({ code }) {
         onInspectCard={setZoom}
       />
 
-      {view.phase !== 'lobby' && (
-      <div className={`main-cols ${logCollapsed ? 'log-collapsed' : ''}`}>
+      {view.phase !== 'lobby' && view.phase !== 'loading' && (
+      <div className={`main-cols ${logCollapsed ? 'log-collapsed' : ''} ${isSpectator ? 'is-spectator' : ''}`}>
         <div
           ref={tableRef}
           className={`table ${isMyTurn ? 'my-turn' : ''} ${isUnderAttack ? 'under-attack' : ''} ${view.nope_window ? 'nope-active' : ''} ${isOracleOpen ? 'oracle-active' : ''} ${drag ? (drag.over ? 'drag-over' : 'drag-hint') : ''}`}
         >
           <div className="table-spotlight" aria-hidden="true" />
+
+          {view.phase === 'playing' && view.turn?.current && (
+            <div className="turn-hud" role="status" aria-live="polite">
+              <span className={`turn-who ${isMyTurn ? 'mine' : ''}`}>
+                <i className="turn-dot" aria-hidden="true" />
+                {isMyTurn ? 'Lượt của bạn' : `Lượt ${view.turn.current}`}
+                {turnsLeft > 1 && <span className="turn-multi">×{turnsLeft}</span>}
+              </span>
+              <span className="turn-dir">
+                {view.turn.direction === -1 ? '← Ngược chiều' : 'Thuận chiều →'}
+              </span>
+              {(view.stash_count ?? 0) > 0 && view.tower_wearer && (
+                <span className="turn-tower">
+                  <RealIcon name="crown" size={13} /> {view.tower_wearer}
+                </span>
+              )}
+              {turnSecLeft !== null && (
+                <span
+                  className={`turn-timer-badge ${turnSecLeft <= 3 ? 'urgent' : turnSecLeft <= 8 ? 'warn' : ''}`}
+                  title="Thời gian còn lại của lượt"
+                >
+                  {turnSecLeft}s
+                </span>
+              )}
+            </div>
+          )}
+
+          {turnBanner && view.phase === 'playing' && (
+            <div
+              key={turnBanner.key}
+              className={`turn-banner ${turnBanner.isMine ? 'mine' : 'other'}`}
+              aria-live="polite"
+            >
+              <span className="turn-banner-eyebrow">
+                {turnBanner.isMine ? 'YOUR TURN' : 'TURN CHANGE'}
+              </span>
+              <div className="turn-banner-title">
+                {turnBanner.isMine ? 'TỚI LƯỢT BẠN!' : `Tới lượt ${turnBanner.actor}`}
+                {turnBanner.turnsLeft > 1 && (
+                  <span className="turn-banner-multi">×{turnBanner.turnsLeft} lượt</span>
+                )}
+              </div>
+            </div>
+          )}
 
           {(view.playmat || []).length > 0 && (
             <div className="playmat-corner">
@@ -1625,9 +1961,9 @@ export default function Room({ code }) {
         </div>
       )}
 
+      {!isSpectator && view.phase !== 'lobby' && view.phase !== 'loading' && (
       <div
         className={`hand-area ${me.blind ? 'blind' : ''} ${!me.alive ? 'dead' : ''} ${isDeadLocked ? 'dead-locked' : ''}`.trim()}
-        style={view.phase === 'lobby' ? { display: 'none' } : undefined}
       >
         {(me.blind || me.marked) && (
           <div className="hand-status-strip">
@@ -1808,6 +2144,7 @@ export default function Room({ code }) {
           )}
         </div>
       </div>
+      )}
 
       {/* bản sao bài đang kéo theo con trỏ */}
       {drag && createPortal(
@@ -1828,13 +2165,15 @@ export default function Room({ code }) {
       <ZoomModal card={zoom} catalog={catalog} onClose={() => setZoom(null)} />
 
       {/* Modal tùy chỉnh nhân vật mèo */}
-      <CatCustomizerModal
-        open={catModalOpen}
-        avatar={myAvatar}
-        playerName={name}
-        onClose={() => setCatModalOpen(false)}
-        onSave={handleSaveAvatar}
-      />
+      {!isSpectator && (
+        <CatCustomizerModal
+          open={catModalOpen}
+          avatar={myAvatar}
+          playerName={name}
+          onClose={() => setCatModalOpen(false)}
+          onSave={handleSaveAvatar}
+        />
+      )}
 
       {/* danh sách các thẻ đã đánh */}
       {graveList && createPortal(

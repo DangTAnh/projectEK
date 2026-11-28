@@ -1,8 +1,10 @@
 """Room: bọc Game với kết nối WebSocket, timer cửa sổ Nope, reconnect theo tên."""
 
 import asyncio
+import json
 import logging
 import os
+from pathlib import Path
 import random
 import secrets
 import time
@@ -11,12 +13,16 @@ from collections import Counter
 from fastapi import WebSocket
 
 from .engine import Game, GameError
-from .engine.deck import available_desks
+from .engine.deck import DESK_DIR, available_desks
 
 logger = logging.getLogger(__name__)
 
 MAX_PLAYERS = 9
+MAX_SPECTATORS = 20
 NOPE_SECONDS = 2
+_INITIAL_TURN_SECONDS = float(os.environ.get("ROOM_TURN_SECONDS", "30"))
+TURN_SECONDS = _INITIAL_TURN_SECONDS
+LOADING_TIMEOUT_SECONDS = 15.0
 SEND_TIMEOUT = 5.0
 MAX_ROOMS = 500
 EMPTY_LOBBY_TTL_SECONDS = 300
@@ -28,6 +34,71 @@ TAKEOVER_CLOSE_CODE = 4001
 AUTH_CLOSE_CODE = 4401
 ROOM_UNAVAILABLE_CLOSE_CODE = 4403
 UNKNOWN_ROOM_CLOSE_CODE = 4404
+
+CARDS_DIR = Path(__file__).resolve().parents[1] / "resources" / "cards"
+
+
+def _turn_seconds() -> float:
+    """Đọc thời lượng lượt (hỗ trợ cả monkeypatch TURN_SECONDS và env ROOM_TURN_SECONDS)."""
+    if TURN_SECONDS != _INITIAL_TURN_SECONDS:
+        return max(0.01, float(TURN_SECONDS))
+    raw = os.environ.get("ROOM_TURN_SECONDS")
+    if raw is not None:
+        try:
+            return max(0.01, float(raw))
+        except ValueError:
+            pass
+    return max(0.01, float(TURN_SECONDS))
+
+
+def desk_image_urls(desk: str) -> list[str]:
+    """Liệt kê URL ảnh lá bài (và mặt sau) cần preload cho bộ bài desk."""
+    urls: list[str] = []
+    seen: set[str] = set()
+
+    def add_url(url: str) -> None:
+        if url not in seen:
+            seen.add(url)
+            urls.append(url)
+
+    def add_card_variant(ctype: str, variant: int | str) -> None:
+        v_str = str(variant)
+        if (CARDS_DIR / ctype / f"{v_str}.jpg").is_file():
+            add_url(f"/static/cards/{ctype}/{v_str}.jpg")
+        elif (CARDS_DIR / ctype / "0.jpg").is_file():
+            add_url(f"/static/cards/{ctype}/0.jpg")
+
+    add_url("/backside.jpg")
+    desk_path = DESK_DIR / f"{desk}.json"
+    cards_map: dict[str, dict] = {}
+    try:
+        data = json.loads(desk_path.read_text(encoding="utf-8"))
+        if isinstance(data, dict) and isinstance(data.get("cards"), dict):
+            cards_map = data["cards"]
+    except (OSError, ValueError):
+        cards_map = {}
+
+    for ctype, variants in cards_map.items():
+        if not isinstance(variants, dict):
+            continue
+        for variant_str, count in variants.items():
+            try:
+                if int(count) <= 0:
+                    continue
+            except (TypeError, ValueError):
+                continue
+            add_card_variant(ctype, variant_str)
+
+    # Game.start() luôn chèn Exploding Kitten với các variant 0..3
+    for ek_var in (0, 1, 2, 3):
+        add_card_variant("explodingkitten", ek_var)
+
+    # Armageddon có thể sinh Devilcat / Godcat
+    if "armageddon" in cards_map:
+        add_card_variant("devilcat", 0)
+        add_card_variant("godcat", 0)
+
+    return urls
 
 AVATAR_ALLOWED: dict[str, set[str]] = {
     "fur": {"ginger", "cream", "gray", "charcoal", "calico", "pink", "mint", "sky", "potato", "sphynx"},
@@ -91,24 +162,71 @@ class InvalidActionError(GameError):
 
 
 class Room:
-    def __init__(self, code: str) -> None:
+    def __init__(self, code: str, manager: "RoomManager | None" = None) -> None:
         self.code = code
+        self.display_code = code
+        self.real_code = code
+        self._manager = manager
         self.votes: dict[str, str] = {}  # name -> desk được vote (lobby)
         self.avatars: dict[str, dict[str, str]] = {}  # name -> cấu hình mèo tuỳ chỉnh
         self.game: Game | None = None
         self.conns: dict[str, WebSocket] = {}  # name -> ws hiện tại
         self.sessions: dict[str, str] = {}  # name -> token reconnect không đoán được
+        self.spectators: set[str] = set()
         self._disconnected_at: dict[str, float] = {}  # lobby: thời điểm ngắt kết nối
         self.last_active = time.time()
         self._lock = asyncio.Lock()
         self._nope_task: asyncio.Task | None = None
+        self._turn_timer_task: asyncio.Task | None = None
+        self._turn_timer_deadline: float | None = None
+        self._turn_timer_key: tuple | None = None
+        self._turn_timer_seq: int = 0
+        self._loading: dict | None = None
+        self._loading_task: asyncio.Task | None = None
 
     def touch(self) -> None:
         self.last_active = time.time()
 
+    def _is_spectator(self, name: str) -> bool:
+        if self.game is not None:
+            return name not in self.game.names
+        if self._loading is not None:
+            return name not in self._loading["players"]
+        return False
+
+    def is_started(self) -> bool:
+        return self.game is not None or self._loading is not None
+
+    def current_phase(self) -> str:
+        if self.game is not None:
+            return self.game.phase
+        if self._loading is not None:
+            return "loading"
+        return "lobby"
+
+    def player_count(self) -> int:
+        return len([n for n in self.conns if not self._is_spectator(n)])
+
+    def spectator_count(self) -> int:
+        return len([n for n in self.conns if self._is_spectator(n)])
+
+    def _sync_spectators_set(self) -> None:
+        self.spectators = {n for n in self.conns if self._is_spectator(n)}
+
+    def _rotate_rematch_code(self) -> str:
+        if self._manager is not None:
+            return self._manager.reallocate_room(self)
+        old_real = self.real_code
+        while True:
+            new_real = "".join(random.choices(CODE_ALPHABET, k=4))
+            if new_real != old_real:
+                break
+        self.real_code = new_real
+        return new_real
+
     def _prune_lobby_sessions(self, now: float | None = None) -> None:
         """Dọn session lobby đã rời quá hạn hoặc vượt ngưỡng để tránh rò bộ nhớ."""
-        if self.game is not None:
+        if self.game is not None or self._loading is not None:
             return
         moment = now if now is not None else time.time()
         expired = [
@@ -137,44 +255,45 @@ class Room:
             clean = (name or "").strip()
             if not clean or len(clean) > 64:
                 raise SessionError("Tên không hợp lệ", code="INVALID_NAME")
-            if self.game is not None and clean not in self.game.names:
-                raise RoomUnavailableError(
-                    "Ván đã bắt đầu, không vào được nữa", code="GAME_STARTED"
-                )
             return self.register(clean, ws, session)
 
     def register(self, name: str, ws: WebSocket, session: str | None = None) -> str:
-        """Đăng ký socket cho một tên, chống chiếm đoạt bằng session token."""
+        """Đăng ký socket cho một tên, chống chiếm đoạt socket đang hoạt động."""
         clean = (name or "").strip()
         if not clean or len(clean) > 64:
             raise SessionError("Tên không hợp lệ", code="INVALID_NAME")
         self.touch()
         self._prune_lobby_sessions()
+        is_spec = self._is_spectator(clean)
         current = self.conns.get(clean)
         if current is None:
-            if len(self.conns) >= MAX_PLAYERS:
-                raise RoomFullError("Phòng đã đầy (tối đa 9)")
+            if is_spec:
+                if self.spectator_count() >= MAX_SPECTATORS:
+                    raise RoomFullError("Phòng khán giả đã đầy (tối đa 20)")
+            elif self.game is None and self._loading is None:
+                if len(self.conns) >= MAX_PLAYERS:
+                    raise RoomFullError("Phòng đã đầy (tối đa 9)")
+
             if clean in self.sessions and session == self.sessions[clean]:
                 # chủ token cũ nhận lại ghế: giữ nguyên token
                 self._disconnected_at.pop(clean, None)
                 self.conns[clean] = ws
+                self._sync_spectators_set()
                 return self.sessions[clean]
-            if self.game is not None and clean in self.sessions:
-                raise SessionError(
-                    "Cần mã phiên hợp lệ để kết nối lại ghế đang chơi",
-                    code="SESSION_INVALID",
-                )
-            # tên mới hoặc nhận lại ghế theo tên ở lobby: luôn cấp token mới,
-            # không nhận token do client tự đưa (chống fixation)
+
+            # tên mới, khán giả mới, hoặc người chơi trong ván mất kết nối quay lại:
+            # luôn cấp token mới không đoán được (chống fixation)
             token = secrets.token_urlsafe(16)
             self._disconnected_at.pop(clean, None)
             self.sessions[clean] = token
             self.conns[clean] = ws
+            self._sync_spectators_set()
             return token
         if session is not None and session == self.sessions.get(clean):
             old = current
             self._disconnected_at.pop(clean, None)
             self.conns[clean] = ws
+            self._sync_spectators_set()
             if old is not None and old is not ws:
                 self._close_later(old, TAKEOVER_CLOSE_CODE)
             return session
@@ -183,9 +302,11 @@ class Room:
     def leave(self, name: str, ws: WebSocket, *, clear_session: bool = False) -> bool:
         clean = (name or "").strip()
         if self.conns.get(clean) is ws:
+            is_spec = self._is_spectator(clean)
             del self.conns[clean]
+            self.spectators.discard(clean)
             self.touch()
-            if self.game is None:
+            if self.game is None and self._loading is None:
                 # Rời lobby hẳn thì vote cũ không còn hiệu lực.
                 self.votes.pop(clean, None)
                 if clear_session:
@@ -194,16 +315,38 @@ class Room:
                     self.avatars.pop(clean, None)
                 else:
                     self._disconnected_at[clean] = time.time()
-            elif clear_session and self.game.phase == "ended":
+            elif is_spec:
                 self.sessions.pop(clean, None)
                 self._disconnected_at.pop(clean, None)
                 self.avatars.pop(clean, None)
-            elif self.game.phase == "playing":
+            elif clear_session and (
+                (self.game is not None and self.game.phase == "ended")
+                or self._loading is not None
+            ):
+                self.sessions.pop(clean, None)
+                self._disconnected_at.pop(clean, None)
+                self.avatars.pop(clean, None)
+            elif self.game is not None and self.game.phase == "playing":
                 player = self.game.players.get(clean)
                 if player is not None and not player.alive:
                     self.game.auto_resolve_dead_pending(include_revive=True)
             return True
         return False
+
+    async def handle_disconnect(self, name: str, ws: WebSocket) -> None:
+        """Xử lý ngắt kết nối dưới lock: rời ghế, auto-resolve dead pending, đồng bộ timer và broadcast."""
+        async with self._lock:
+            if not self.leave(name, ws):
+                return
+            if self._loading is not None:
+                connected_players = [n for n in self._loading["players"] if n in self.conns]
+                if len(connected_players) < 2 or all(n in self._loading["ready"] for n in connected_players):
+                    await self._finish_loading_locked()
+                    return
+            if self.game is not None and self.game.phase == "playing":
+                self._sync_nope_timer_locked(self.game)
+                self._sync_turn_timer_locked(self.game, reset=False)
+            await self._broadcast_locked()
 
     def _require_sender(self, name: str, ws: WebSocket | None, session: str | None) -> None:
         clean = (name or "").strip()
@@ -232,11 +375,16 @@ class Room:
         failed: list[tuple[str, WebSocket]] = []
         for (name, ws, _), result in zip(payloads, results):
             if result is not None and self.conns.get(name) is ws:
+                was_spec = self._is_spectator(name)
                 del self.conns[name]
-                if self.game is None:
+                self.spectators.discard(name)
+                if self.game is None and self._loading is None:
                     # socket chết rớt khỏi lobby thì vote của họ cũng hết hiệu lực
                     self.votes.pop(name, None)
                     self._disconnected_at[name] = time.time()
+                elif was_spec:
+                    self.sessions.pop(name, None)
+                    self.avatars.pop(name, None)
                 failed.append((name, ws))
         for name, ws in failed:
             logger.warning("Dropping failed socket for %s in room %s", name, self.code)
@@ -264,13 +412,85 @@ class Room:
         task = asyncio.create_task(_close())
         task.add_done_callback(lambda _: task.exception() if not task.cancelled() else None)
 
+    def _turn_timer_view(self) -> dict | None:
+        g = self.game
+        if (
+            g is None
+            or g.phase != "playing"
+            or g.nope is not None
+            or g.pending is not None
+            or self._turn_timer_deadline is None
+        ):
+            return None
+        now_ms = int(time.time() * 1000)
+        ends_ms = int(self._turn_timer_deadline * 1000)
+        return {
+            "actor": g.order[g.turn_index],
+            "ends_ms": ends_ms,
+            "server_now_ms": now_ms,
+            "remaining_ms": max(0, ends_ms - now_ms),
+            "duration_ms": int(round(_turn_seconds() * 1000)),
+        }
+
     def _view_for(self, name: str) -> dict:
         debug_enabled = _is_debug_enabled()
+        spec_count = self.spectator_count()
+        if self._loading is not None:
+            is_spec = name not in self._loading["players"]
+            now_ms = int(time.time() * 1000)
+            ends_ms = int(self._loading["ends_at"] * 1000)
+            return {
+                "phase": "loading",
+                "debug_enabled": debug_enabled,
+                "display_code": self.display_code,
+                "real_code": self.real_code,
+                "spectator_count": spec_count,
+                "turn_timer": None,
+                "loading": {
+                    "desk": self._loading["desk"],
+                    "images": list(self._loading["images"]),
+                    "ready": sorted(self._loading["ready"]),
+                    "players": list(self._loading["players"]),
+                    "total": len(self._loading["players"]),
+                    "ends_ms": ends_ms,
+                    "server_now_ms": now_ms,
+                    "remaining_ms": max(0, ends_ms - now_ms),
+                },
+                "players": [
+                    {
+                        "name": n,
+                        "count": 0,
+                        "alive": True,
+                        "connected": n in self.conns,
+                        "avatar": self.avatars.get(n),
+                    }
+                    for n in self._loading["players"]
+                ],
+                "deck_count": 0,
+                "stash_count": 0,
+                "votes": dict(self.votes),
+                "you": {
+                    "name": name,
+                    "alive": not is_spec,
+                    "spectator": is_spec,
+                    "hand": [],
+                    "hand_count": 0,
+                    "blind": False,
+                    "marked": None,
+                    "illtake_by": None,
+                    "extra_turns": 0,
+                    "session": self.sessions.get(name),
+                },
+            }
         if self.game is None:
             # cùng shape với game.view() để frontend không phải đoán
             return {
                 "phase": "lobby",
                 "debug_enabled": debug_enabled,
+                "display_code": self.display_code,
+                "real_code": self.real_code,
+                "spectator_count": 0,
+                "turn_timer": None,
                 "players": [
                     {
                         "name": n,
@@ -287,14 +507,62 @@ class Room:
                 "you": {
                     "name": name,
                     "alive": True,
+                    "spectator": False,
                     "hand": [],
                     "hand_count": 0,
                     "session": self.sessions.get(name),
                 },
             }
-        view = self.game.view(name)
+
+        is_spec = name not in self.game.names
+        if is_spec:
+            view = self.game.view(self.game.order[0])
+            view["you"] = {
+                "name": name,
+                "alive": False,
+                "spectator": True,
+                "hand": [],
+                "hand_count": 0,
+                "blind": False,
+                "marked": None,
+                "illtake_by": None,
+                "extra_turns": 0,
+                "session": self.sessions.get(name),
+            }
+            public_entries = [
+                {"seq": seq, "text": text}
+                for seq, text, viewer in self.game.log_entries
+                if viewer is None
+            ][-30:]
+            view["log_entries"] = public_entries
+            view["log"] = [e["text"] for e in public_entries]
+            pending = view.get("pending")
+            if isinstance(pending, dict):
+                pdata = pending.get("data") or {}
+                reason = pdata.get("reason")
+                view["pending"] = {
+                    "kind": pending.get("kind"),
+                    "owner": pending.get("owner"),
+                    "data": {"reason": reason} if reason is not None else {},
+                }
+            if isinstance(view.get("nope_window"), dict):
+                view["nope_window"]["you_responded"] = False
+            for p in view.get("players", []):
+                gp = self.game.players.get(p["name"])
+                if gp is not None:
+                    p["marked"] = next(
+                        (c.to_dict() for c in gp.hand if c.id == gp.marked_id),
+                        None,
+                    )
+        else:
+            view = self.game.view(name)
+            view["you"]["spectator"] = False
+            view["you"]["session"] = self.sessions.get(name)
+
         view["debug_enabled"] = debug_enabled
-        view["you"]["session"] = self.sessions.get(name)
+        view["display_code"] = self.display_code
+        view["real_code"] = self.real_code
+        view["spectator_count"] = spec_count
         for p in view.get("players", []):
             p["connected"] = p["name"] in self.conns
             p["avatar"] = self.avatars.get(p["name"])
@@ -305,6 +573,7 @@ class Room:
             ends_ms = nw.get("ends_ms")
             if isinstance(ends_ms, (int, float)):
                 nw["remaining_ms"] = max(0, int(ends_ms) - now_ms)
+        view["turn_timer"] = self._turn_timer_view()
         return view
 
     # ---------- debug orchestration (EK_DEBUG=1) ----------
@@ -322,10 +591,13 @@ class Room:
 
     def _debug_snapshot_locked(self) -> dict:
         return {
-            "code": self.code,
-            "started": self.game is not None,
-            "phase": self.game.phase if self.game else "lobby",
-            "connected_players": sorted(self.conns),
+            "code": self.display_code,
+            "display_code": self.display_code,
+            "real_code": self.real_code,
+            "started": self.is_started(),
+            "phase": self.current_phase(),
+            "connected_players": sorted(n for n in self.conns if not self._is_spectator(n)),
+            "spectator_count": self.spectator_count(),
             "votes": dict(self.votes),
             "debug_enabled": _is_debug_enabled(),
             "game": self.game.debug_snapshot() if self.game else None,
@@ -345,14 +617,16 @@ class Room:
                 raise GameError("Debug đã tắt")
             self.touch()
             if op == "start":
-                if self.game is not None:
+                if self.is_started():
                     raise GameError("Ván đã bắt đầu, không thể bắt đầu lại")
                 await self._start_game_locked()
                 return self._debug_snapshot_locked()
             if op == "return_lobby":
-                self._cancel_nope_timer()
+                self._cancel_timers()
+                self._loading = None
                 self.game = None
                 self.votes = {}
+                self.spectators.clear()
                 self._disconnected_at.clear()
                 self.sessions = {n: t for n, t in self.sessions.items() if n in self.conns}
                 await self._broadcast_locked()
@@ -448,7 +722,7 @@ class Room:
                 if auto_draw:
                     g.draw(target)
 
-            await self._after_action_locked()
+            await self._after_action_locked(reset_turn_timer=True)
             return self._debug_snapshot_locked()
 
     # ---------- kiểm tra gói tin ----------
@@ -482,55 +756,124 @@ class Room:
             act = msg.get("action")
             if not isinstance(act, str) or not act:
                 raise InvalidActionError("Thiếu action")
+            clean = (name or "").strip()
+            is_spec = self._is_spectator(clean)
+
             if act == "leave":
-                if self.game is not None and self.game.phase != "ended":
+                if self.game is not None and self.game.phase != "ended" and not is_spec:
                     raise GameError("Không thể rời ghế khi ván đang diễn ra")
-                clean = (name or "").strip()
                 if ws is not None:
                     self.leave(clean, ws, clear_session=True)
                 else:
                     self.conns.pop(clean, None)
                     self.sessions.pop(clean, None)
+                    self.spectators.discard(clean)
                     self._disconnected_at.pop(clean, None)
                     self.votes.pop(clean, None)
                     self.touch()
+                if self._loading is not None and not is_spec:
+                    if clean in self._loading["players"]:
+                        self._loading["players"].remove(clean)
+                    self._loading["ready"].discard(clean)
+                    if len(self._loading["players"]) < 2:
+                        self._cancel_loading_timer()
+                        self._loading = None
+                        self.spectators.clear()
+                    else:
+                        connected_players = [n for n in self._loading["players"] if n in self.conns]
+                        if len(connected_players) >= 2 and all(n in self._loading["ready"] for n in connected_players):
+                            await self._finish_loading_locked()
+                            if ws is not None:
+                                self._close_later(ws, 1000)
+                            return
                 await self._broadcast_locked()
                 if ws is not None:
                     self._close_later(ws, 1000)
                 return
+
+            if is_spec:
+                raise GameError("Đang ở chế độ khán giả — chờ ván sau")
+
             if act == "start":
-                if self.game is not None:
+                if self.is_started():
                     raise GameError("Ván đã bắt đầu, không thể bắt đầu lại")
-                await self._start_game_locked()
+                preload = bool(msg.get("preload", False))
+                players = sorted(self.conns)
+                if preload:
+                    await self._begin_loading_locked(players=players, preferred_desk=None, is_rematch=False)
+                else:
+                    await self._start_game_locked(players=players)
                 return
             if act == "rematch":
-                if self.game is None or self.game.phase != "ended":
+                if self._loading is not None or self.game is None or self.game.phase != "ended":
                     raise GameError("Chỉ có thể chơi lại khi ván đã kết thúc")
-                await self._start_game_locked(
-                    preferred_desk=getattr(self.game, "desk_name", None)
-                )
+                old_connected = [n for n in self.game.names if n in self.conns]
+                spec_connected = [n for n in sorted(self.conns) if n not in self.game.names]
+                players = (old_connected + spec_connected)[:MAX_PLAYERS]
+                if not (2 <= len(players) <= MAX_PLAYERS):
+                    raise GameError("Cần 2–9 người trong phòng")
+                preferred_desk = getattr(self.game, "desk_name", None)
+                preload = bool(msg.get("preload", False))
+                if preload:
+                    await self._begin_loading_locked(
+                        players=players,
+                        preferred_desk=preferred_desk,
+                        is_rematch=True,
+                    )
+                else:
+                    await self._start_game_locked(
+                        preferred_desk=preferred_desk,
+                        players=players,
+                        rotate_code=True,
+                    )
                 return
             if act == "return_lobby":
-                if self.game is None or self.game.phase != "ended":
+                if self._loading is not None or self.game is None or self.game.phase != "ended":
                     raise GameError("Chỉ có thể về phòng chờ khi ván đã kết thúc")
-                self._cancel_nope_timer()
+                old_names = set(self.game.names)
+                self._cancel_timers()
                 self.game = None
+                self._loading = None
                 self.votes = {}
-                self.sessions = {n: t for n, t in self.sessions.items() if n in self.conns}
+                self.spectators.clear()
                 self._disconnected_at.clear()
+                if len(self.conns) > MAX_PLAYERS:
+                    keep = [n for n in self.conns if n in old_names]
+                    extras = [n for n in sorted(self.conns) if n not in old_names]
+                    allowed = set((keep + extras)[:MAX_PLAYERS])
+                    for drop_name in list(self.conns):
+                        if drop_name not in allowed:
+                            drop_ws = self.conns.pop(drop_name, None)
+                            self.avatars.pop(drop_name, None)
+                            if drop_ws is not None:
+                                self._close_later(drop_ws, ROOM_UNAVAILABLE_CLOSE_CODE)
+                self.sessions = {n: t for n, t in self.sessions.items() if n in self.conns}
+                await self._broadcast_locked()
+                return
+            if act == "assets_ready":
+                if self._loading is None:
+                    if self.game is not None and self.game.phase == "playing":
+                        return
+                    raise GameError("Không ở trạng thái tải bộ bài")
+                if clean in self._loading["players"]:
+                    self._loading["ready"].add(clean)
+                    connected_players = [n for n in self._loading["players"] if n in self.conns]
+                    if len(connected_players) >= 2 and all(n in self._loading["ready"] for n in connected_players):
+                        await self._finish_loading_locked()
+                        return
                 await self._broadcast_locked()
                 return
             if act == "vote_desk":
                 desk = msg.get("desk") or ""
                 if desk not in available_desks():
                     raise GameError(f"Không có bộ bài {desk}")
-                if self.game is None:
-                    self.votes[name] = desk
+                if not self.is_started():
+                    self.votes[clean] = desk
                     await self._broadcast_locked()
                 return
             if act == "set_avatar":
                 clean_avatar = sanitize_avatar(msg.get("avatar"))
-                self.avatars[name] = clean_avatar
+                self.avatars[clean] = clean_avatar
                 await self._broadcast_locked()
                 return
             if act not in ("play", "combo", "draw", "respond", "nope", "pass_nope", "play_now", "debug_give"):
@@ -541,38 +884,38 @@ class Room:
                 if as_type is not None and not isinstance(as_type, str):
                     raise GameError("as_type không hợp lệ")
                 raw_card_id = msg.get("card_id")
-                player = g.players.get(name)
+                player = g.players.get(clean)
                 if player is not None and player.blind:
                     if raw_card_id is not None and not isinstance(raw_card_id, str):
                         raise GameError("card_id không hợp lệ")
                     card_id = raw_card_id or ""
                 else:
                     card_id = self._need_text(msg, "card_id")
-                g.play_card(name, card_id, as_type=as_type)
+                g.play_card(clean, card_id, as_type=as_type)
             elif act == "combo":
                 combo = self._need_text(msg, "combo")
                 if combo not in ("pair", "three"):
                     raise GameError("Combo không hợp lệ")
                 need = 2 if combo == "pair" else 3
-                g.play_combo(name, combo, self._need_name_list(msg, "card_ids", need))
+                g.play_combo(clean, combo, self._need_name_list(msg, "card_ids", need))
             elif act == "draw":
-                g.draw(name)
+                g.draw(clean)
             elif act == "respond":
                 payload = msg.get("payload", {})
                 if payload is None:
                     payload = {}
                 if not isinstance(payload, dict):
                     raise GameError("Payload quyết định không hợp lệ")
-                g.respond(name, payload)
+                g.respond(clean, payload)
             elif act == "nope":
-                g.stack_nope(name)
+                g.stack_nope(clean)
             elif act == "pass_nope":
-                g.pass_nope(name)
+                g.pass_nope(clean)
             elif act == "play_now":
                 as_type = msg.get("as_type")
                 if as_type is not None and not isinstance(as_type, str):
                     raise GameError("as_type không hợp lệ")
-                g.play_now(name, self._need_text(msg, "card_id"), as_type=as_type)
+                g.play_now(clean, self._need_text(msg, "card_id"), as_type=as_type)
             elif act == "debug_give":
                 if not _is_debug_enabled():
                     raise GameError("Debug đã tắt")
@@ -582,54 +925,115 @@ class Room:
                     variant = int(raw_variant or 0)
                 except (TypeError, ValueError):
                     raise GameError("variant không hợp lệ") from None
-                g.debug_give(name, ctype, variant)
+                g.debug_give(clean, ctype, variant)
             else:
                 raise InvalidActionError(f"Lệnh lạ: {act}")
-            await self._after_action_locked()
+            await self._after_action_locked(reset_turn_timer=True)
 
     def _require_game(self) -> Game:
         if self.game is None:
             raise GameError("Ván chưa bắt đầu")
         return self.game
 
-    async def start_game(self) -> None:
-        async with self._lock:
-            if self.game is not None:
-                raise GameError("Ván đã bắt đầu, không thể bắt đầu lại")
-            await self._start_game_locked()
-
-    async def _start_game_locked(self, *, preferred_desk: str | None = None) -> None:
-        names = sorted(self.conns)
-        if not (2 <= len(names) <= MAX_PLAYERS):
-            raise GameError("Cần 2–9 người trong phòng")
-        self._cancel_nope_timer()
+    def _pick_desk(self, preferred_desk: str | None = None) -> str:
         desks = available_desks()
         if not desks:
             raise GameError("Chưa có bộ bài nào")
         if self.votes:  # desk được vote nhiều nhất; hoà thì cái đầu tiên
-            desk = Counter(self.votes.values()).most_common(1)[0][0]
-        elif preferred_desk and preferred_desk in desks:
-            desk = preferred_desk
-        else:  # không ai vote -> ngẫu nhiên
-            desk = random.choice(desks)
+            return Counter(self.votes.values()).most_common(1)[0][0]
+        if preferred_desk and preferred_desk in desks:
+            return preferred_desk
+        return random.choice(desks)
+
+    async def start_game(self) -> None:
+        async with self._lock:
+            if self.is_started():
+                raise GameError("Ván đã bắt đầu, không thể bắt đầu lại")
+            await self._start_game_locked()
+
+    async def _begin_loading_locked(
+        self,
+        *,
+        players: list[str],
+        preferred_desk: str | None = None,
+        is_rematch: bool = False,
+    ) -> None:
+        if not (2 <= len(players) <= MAX_PLAYERS):
+            raise GameError("Cần 2–9 người trong phòng")
+        desk = self._pick_desk(preferred_desk)
+        images = desk_image_urls(desk)
+        self._cancel_timers()
+        if is_rematch:
+            self._rotate_rematch_code()
+        self.game = None
+        self.votes = {}
+        self._disconnected_at.clear()
+        self._loading = {
+            "desk": desk,
+            "images": images,
+            "players": list(players),
+            "ready": set(),
+            "ends_at": time.time() + LOADING_TIMEOUT_SECONDS,
+            "is_rematch": is_rematch,
+        }
+        self._sync_spectators_set()
+        self._loading_task = asyncio.create_task(self._loading_timeout_timer(self._loading))
+        await self._broadcast_locked()
+
+    async def _finish_loading_locked(self) -> None:
+        loading = self._loading
+        if loading is None:
+            return
+        self._cancel_loading_timer()
+        players = [n for n in loading["players"] if n in self.conns]
+        if len(players) < 2:
+            self._loading = None
+            self.spectators.clear()
+            await self._broadcast_locked()
+            return
+        desk = loading["desk"]
+        self._loading = None
+        await self._start_game_locked(preferred_desk=desk, players=players, forced_desk=desk)
+
+    async def _start_game_locked(
+        self,
+        *,
+        preferred_desk: str | None = None,
+        players: list[str] | None = None,
+        forced_desk: str | None = None,
+        rotate_code: bool = False,
+    ) -> None:
+        names = list(players) if players is not None else sorted(self.conns)
+        if not (2 <= len(names) <= MAX_PLAYERS):
+            raise GameError("Cần 2–9 người trong phòng")
+        desk = forced_desk or self._pick_desk(preferred_desk)
         # dựng + chia bài xong mới gán: start() hỏng thì lobby/vote còn nguyên
         game = Game(names, desk=desk)
         game.start()
         game.announce_desk(desk)
+        self._cancel_timers()
+        if rotate_code:
+            self._rotate_rematch_code()
+        self._loading = None
         self.game = game
         self.votes = {}
         self.sessions = {n: t for n, t in self.sessions.items() if n in self.conns}
         self._disconnected_at.clear()
-        logger.info("Started game in room %s with %d players (desk=%s)", self.code, len(names), desk)
+        self._sync_spectators_set()
+        self._sync_turn_timer_locked(game, reset=True)
+        logger.info("Started game in room %s (real=%s) with %d players (desk=%s)",
+                    self.display_code, self.real_code, len(names), desk)
         await self._broadcast_locked()
 
-    async def _after_action_locked(self) -> None:
-        """Sau mọi lệnh: đồng bộ timer cửa sổ Nope rồi broadcast."""
+    async def _after_action_locked(self, *, reset_turn_timer: bool = True) -> None:
+        """Sau mọi lệnh: đồng bộ timer cửa sổ Nope, timer lượt rồi broadcast."""
         g = self.game
         if g is None:
+            self._cancel_turn_timer()
             await self._broadcast_locked()
             return
         self._sync_nope_timer_locked(g)
+        self._sync_turn_timer_locked(g, reset=reset_turn_timer)
         await self._broadcast_locked()
 
     def _sync_nope_timer_locked(self, g: Game) -> None:
@@ -646,6 +1050,22 @@ class Room:
             g.nope_deadline = time.time() + NOPE_SECONDS
             self._nope_task = asyncio.create_task(self._nope_timer(g))
 
+    def _sync_turn_timer_locked(self, g: Game, *, reset: bool = False) -> None:
+        if g.phase != "playing" or g.nope is not None or g.pending is not None:
+            self._cancel_turn_timer()
+            return
+        actor = g.order[g.turn_index]
+        if not reset and self._turn_timer_task is not None and self._turn_timer_deadline is not None:
+            return
+        self._cancel_turn_timer()
+        self._turn_timer_seq += 1
+        duration = _turn_seconds()
+        deadline = time.time() + duration
+        key = (id(g), g.turn_index, g.turns_left, actor, self._turn_timer_seq)
+        self._turn_timer_deadline = deadline
+        self._turn_timer_key = key
+        self._turn_timer_task = asyncio.create_task(self._turn_timer(g, key, deadline))
+
     # ---------- timer ----------
 
     def _cancel_nope_timer(self) -> None:
@@ -653,6 +1073,25 @@ class Room:
         if task:
             task.cancel()
         self._nope_task = None
+
+    def _cancel_turn_timer(self) -> None:
+        task = self._turn_timer_task
+        if task:
+            task.cancel()
+        self._turn_timer_task = None
+        self._turn_timer_deadline = None
+        self._turn_timer_key = None
+
+    def _cancel_loading_timer(self) -> None:
+        task = self._loading_task
+        if task:
+            task.cancel()
+        self._loading_task = None
+
+    def _cancel_timers(self) -> None:
+        self._cancel_nope_timer()
+        self._cancel_turn_timer()
+        self._cancel_loading_timer()
 
     async def _nope_timer(self, game: Game) -> None:
         wait = max(0.0, (game.nope_deadline or 0) - time.time())
@@ -664,17 +1103,53 @@ class Room:
                 if self.game is not game or game.nope is None:
                     return
                 game.resolve_nope()
+                self._sync_turn_timer_locked(game, reset=True)
                 await self._broadcast_locked()
         except Exception:
             logger.exception("Unhandled error in Nope timer for room %s", self.code)
+
+    async def _turn_timer(self, game: Game, expected_key: tuple, deadline: float) -> None:
+        wait = max(0.0, deadline - time.time())
+        await asyncio.sleep(wait)
+        try:
+            async with self._lock:
+                if self._turn_timer_task is asyncio.current_task():
+                    self._turn_timer_task = None
+                if self.game is not game:
+                    return
+                if game.phase != "playing" or game.nope is not None or game.pending is not None:
+                    return
+                if self._turn_timer_key != expected_key:
+                    return
+                self._turn_timer_deadline = None
+                self._turn_timer_key = None
+                actor = game.order[game.turn_index]
+                game._say(f"⏱️ Hết giờ lượt {actor} — tự động rút bài.")
+                game.draw(actor)
+                await self._after_action_locked(reset_turn_timer=True)
+        except Exception:
+            logger.exception("Unhandled error in Turn timer for room %s", self.code)
+
+    async def _loading_timeout_timer(self, loading_ref: dict) -> None:
+        wait = max(0.0, loading_ref["ends_at"] - time.time())
+        await asyncio.sleep(wait)
+        try:
+            async with self._lock:
+                if self._loading_task is asyncio.current_task():
+                    self._loading_task = None
+                if self._loading is not loading_ref:
+                    return
+                await self._finish_loading_locked()
+        except Exception:
+            logger.exception("Unhandled error in Loading timer for room %s", self.code)
 
     def is_idle(self, now: float | None = None) -> bool:
         if self.conns:
             return False
         idle_for = (now if now is not None else time.time()) - self.last_active
-        if self.game is None:
+        if self.game is None and self._loading is None:
             return idle_for > EMPTY_LOBBY_TTL_SECONDS
-        if self.game.phase == "ended":
+        if self.game is not None and self.game.phase == "ended":
             return idle_for > LOBBY_TTL_SECONDS
         return idle_for > GAME_TTL_SECONDS
 
@@ -682,6 +1157,7 @@ class Room:
 class RoomManager:
     def __init__(self) -> None:
         self.rooms: dict[str, Room] = {}
+        self.aliases: dict[str, str] = {}  # display_code -> real_code
 
     def create(self) -> str:
         self.prune()
@@ -689,19 +1165,41 @@ class RoomManager:
             raise GameError("Máy chủ đã đầy phòng, hãy thử lại sau")
         while True:
             code = "".join(random.choices(CODE_ALPHABET, k=4))
-            if code not in self.rooms:
+            if code not in self.rooms and code not in self.aliases:
                 break
-        self.rooms[code] = Room(code)
+        room = Room(code, manager=self)
+        self.rooms[code] = room
+        self.aliases[code] = code
         logger.info("Created room %s (total=%d)", code, len(self.rooms))
         return code
 
+    def reallocate_room(self, room: Room) -> str:
+        """Cấp real_code mới khi rematch, giữ nguyên display_code trong aliases."""
+        self.prune()
+        old_real = room.real_code
+        while True:
+            new_real = "".join(random.choices(CODE_ALPHABET, k=4))
+            if new_real not in self.rooms and new_real not in self.aliases:
+                break
+        if self.rooms.get(old_real) is room:
+            del self.rooms[old_real]
+        room.real_code = new_real
+        self.rooms[new_real] = room
+        self.aliases[room.display_code] = new_real
+        logger.info("Reallocated rematch room %s -> real_code=%s", room.display_code, new_real)
+        return new_real
+
     def get(self, code: str) -> Room | None:
         self.prune()
-        room = self.rooms.get((code or "").upper())
+        upper = (code or "").upper()
+        real = self.aliases.get(upper, upper)
+        room = self.rooms.get(real)
         if room is not None and room.is_idle():
-            room._cancel_nope_timer()
-            del self.rooms[room.code]
-            logger.info("Pruned idle room %s on lookup", room.code)
+            room._cancel_timers()
+            self.rooms.pop(room.real_code, None)
+            if self.aliases.get(room.display_code) == room.real_code:
+                self.aliases.pop(room.display_code, None)
+            logger.info("Pruned idle room %s on lookup", room.display_code)
             return None
         return room
 
@@ -714,7 +1212,9 @@ class RoomManager:
         for code in [code for code, room in self.rooms.items() if room.is_idle(moment)]:
             room = self.rooms.pop(code, None)
             if room is not None:
-                room._cancel_nope_timer()
+                room._cancel_timers()
+                if self.aliases.get(room.display_code) == room.real_code:
+                    self.aliases.pop(room.display_code, None)
                 logger.info("Pruned idle room %s", code)
 
 

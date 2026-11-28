@@ -698,7 +698,7 @@ class TestPlayerEffects:
         assert g.deck.peek(1)[0].id == bomb.id
 
     def test_blind_draw_bomb_picking_skip_or_superskip_explodes_immediately(self):
-        for fatal_type in ("skip", "superskip"):
+        for fatal_type in ("skip", "superskip", "personalattack3x"):
             g = make_game(3)
             first = cur(g).name
             p = g.players[first]

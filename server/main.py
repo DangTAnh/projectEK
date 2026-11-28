@@ -24,6 +24,7 @@ from .rooms import (
     RoomUnavailableError,
     SessionError,
     _is_debug_enabled,
+    desk_image_urls,
 )
 
 logger = logging.getLogger(__name__)
@@ -229,15 +230,28 @@ async def list_desk_details() -> list[dict]:
     return desk_catalog()
 
 
+@app.get("/api/desks/{desk}/images")
+async def list_desk_images(desk: str) -> JSONResponse:
+    if desk not in available_desks():
+        return JSONResponse(
+            {"code": "DESK_NOT_FOUND", "message": f"Không có bộ bài {desk}"},
+            status_code=404,
+        )
+    return JSONResponse({"desk": desk, "images": desk_image_urls(desk)})
+
+
 @app.get("/api/rooms")
 async def list_rooms() -> list[dict]:
     return [
         {
-            "code": r.code,
-            "player_count": len(r.conns),
+            "code": r.display_code,
+            "display_code": r.display_code,
+            "real_code": r.real_code,
+            "player_count": r.player_count(),
+            "spectator_count": r.spectator_count(),
             "max_players": MAX_PLAYERS,
-            "started": r.game is not None,
-            "phase": r.game.phase if r.game else "lobby",
+            "started": r.is_started(),
+            "phase": r.current_phase(),
         }
         for r in MANAGER.active_rooms()
     ]
@@ -253,11 +267,14 @@ async def get_room(code: str) -> JSONResponse:
         )
     return JSONResponse(
         {
-            "code": room.code,
-            "player_count": len(room.conns),
+            "code": room.display_code,
+            "display_code": room.display_code,
+            "real_code": room.real_code,
+            "player_count": room.player_count(),
+            "spectator_count": room.spectator_count(),
             "max_players": MAX_PLAYERS,
-            "started": room.game is not None,
-            "phase": room.game.phase if room.game else "lobby",
+            "started": room.is_started(),
+            "phase": room.current_phase(),
         }
     )
 
@@ -276,12 +293,15 @@ async def debug_list_rooms() -> JSONResponse:
     return JSONResponse(
         [
             {
-                "code": r.code,
-                "player_count": len(r.conns),
+                "code": r.display_code,
+                "display_code": r.display_code,
+                "real_code": r.real_code,
+                "player_count": r.player_count(),
+                "spectator_count": r.spectator_count(),
                 "max_players": MAX_PLAYERS,
-                "started": r.game is not None,
-                "phase": r.game.phase if r.game else "lobby",
-                "players": sorted(r.conns),
+                "started": r.is_started(),
+                "phase": r.current_phase(),
+                "players": sorted(n for n in r.conns if not r._is_spectator(n)),
             }
             for r in MANAGER.active_rooms()
         ]
@@ -333,7 +353,15 @@ async def debug_room_action(code: str, request: Request) -> JSONResponse:
     return JSONResponse(snapshot)
 
 
-app.mount("/static/cards", StaticFiles(directory=CARDS_DIR), name="cards")
+class CachedStaticFiles(StaticFiles):
+    async def get_response(self, path: str, scope):
+        response = await super().get_response(path, scope)
+        if response.status_code == 200:
+            response.headers.setdefault("Cache-Control", "public, max-age=86400")
+        return response
+
+
+app.mount("/static/cards", CachedStaticFiles(directory=CARDS_DIR), name="cards")
 
 
 # ---------- WebSocket ----------
@@ -390,11 +418,10 @@ async def ws_room(ws: WebSocket, code: str, name: str = "", token: str | None = 
         # rời phòng thì báo cho người còn lại biết roster lobby đã đổi.
         # shield: socket vừa rớt có thể bị huỷ scope ngay (TestClient/tắt server);
         # để cancel xuyên qua sẽ làm broadcast dở dang, người còn lại mất state.
-        if room.leave(clean, ws):
-            try:
-                await asyncio.shield(room.push_all())
-            except Exception:
-                logger.exception("Failed to broadcast leave for %s in room %s", clean, code)
+        try:
+            await asyncio.shield(room.handle_disconnect(clean, ws))
+        except Exception:
+            logger.exception("Failed to broadcast leave for %s in room %s", clean, code)
 
 
 def run(host: str = "0.0.0.0", port: int = 8000) -> None:  # pragma: no cover

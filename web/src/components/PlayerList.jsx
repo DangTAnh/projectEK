@@ -1,7 +1,9 @@
 import React, { useEffect, useRef } from 'react'
 import RealIcon from './RealIcon.jsx'
 import CatAvatar from './CatAvatar.jsx'
+import CardView from './CardView.jsx'
 import { getCardName } from '../utils/cardCatalog.js'
+import './PlayerList.css'
 
 export default function PlayerList({
   players,
@@ -37,6 +39,12 @@ export default function PlayerList({
         const isTower = !!towerWearer && towerWearer === p.name
         const turnsLeft = isTurn && (turn?.turns_left ?? 1) > 1 ? turn.turns_left : 0
         const markedName = p.marked ? getCardName(catalog, p.marked.type, p.marked.variant) : ''
+        const illTakeCard = p.illtake_by
+          ? { id: `illtake-${p.name}`, type: 'illtakethat', variant: 0 }
+          : null
+        const faceupCards = Array.isArray(p.faceup) ? p.faceup : []
+        const hasSeatTags = !isConnected || isTower || p.blind || turnsLeft > 1 || (!isTurn && p.extra_turns > 0)
+        const hasPeeks = Boolean(p.marked || illTakeCard || faceupCards.length > 0)
         const canEditMe = isMe && typeof onEditAvatar === 'function'
         const nextPlayer = idx < list.length - 1 ? list[idx + 1] : null
         const arrowActive = isPlaying && (
@@ -90,7 +98,7 @@ export default function PlayerList({
               </div>
             )}
 
-            <div className="seat-plate">
+            <div className="seat-plate player-nameplate">
               <div className="seat-main">
                 <span className="pname">
                   {p.name}
@@ -106,7 +114,7 @@ export default function PlayerList({
                   </span>
                 )}
               </div>
-              {(!isConnected || isTower || p.blind || turnsLeft > 1 || (!isTurn && p.extra_turns > 0) || (p.faceup?.length || 0) > 0 || p.illtake_by || p.marked) && (
+              {hasSeatTags && (
                 <div className="seat-tags">
                   {!isConnected && (
                     <span className="offline-tag" title="Mất kết nối">
@@ -127,29 +135,60 @@ export default function PlayerList({
                   {!isTurn && p.extra_turns > 0 && (
                     <span className="extra-badge" title={`Có thêm ${p.extra_turns} lượt`}>+{p.extra_turns}</span>
                   )}
-                  {(p.faceup?.length || 0) > 0 && (
-                    <span className="chip-icon" title="Barking Kitten lật trước mặt">
-                      <RealIcon name="dog" size={15} />
-                    </span>
-                  )}
-                  {p.illtake_by && (
-                    <span className="trap-pill" title={`Lá rút kế tiếp thuộc về ${p.illtake_by}`}>
-                      <RealIcon name="trap" size={13} /> {p.illtake_by}
-                    </span>
-                  )}
-                  {p.marked && (
-                    <button
-                      type="button"
-                      className="marked-pill"
-                      title={`Lá bị Mark: ${markedName} (bấm để xem)`}
-                      onClick={() => onInspectCard?.(p.marked)}
-                    >
-                      <RealIcon name="pin" size={13} /> {markedName}
-                    </button>
-                  )}
                 </div>
               )}
             </div>
+            {hasPeeks && (
+              <div className="seat-peeks" aria-label={`Thẻ công khai của ${p.name}`}>
+                {p.marked && (
+                  <button
+                    type="button"
+                    className="seat-peek-card is-marked"
+                    title={`Lá bị Mark: ${markedName} (bấm để xem)`}
+                    aria-label={`Lá bị Mark: ${markedName}`}
+                    onClick={() => onInspectCard?.(p.marked)}
+                  >
+                    <span className="seat-peek-clip">
+                      <CardView card={p.marked} small marked catalog={catalog} />
+                    </span>
+                  </button>
+                )}
+                {illTakeCard && (
+                  <button
+                    type="button"
+                    className="seat-peek-card is-trap"
+                    title={`Bị ${p.illtake_by} đặt bẫy I'll Take That`}
+                    aria-label={`Bị ${p.illtake_by} đặt bẫy I'll Take That`}
+                    onClick={() => onInspectCard?.(illTakeCard)}
+                  >
+                    <span className="seat-peek-clip">
+                      <CardView card={illTakeCard} small catalog={catalog} />
+                    </span>
+                    <span className="seat-peek-badge is-trap">
+                      <RealIcon name="trap" size={10} />
+                      <span className="seat-peek-who">{p.illtake_by}</span>
+                    </span>
+                  </button>
+                )}
+                {faceupCards.map((c, cIdx) => {
+                  const faceupName = getCardName(catalog, c.type)
+                  return (
+                    <button
+                      key={c.id || `${p.name}-faceup-${cIdx}`}
+                      type="button"
+                      className="seat-peek-card is-faceup"
+                      title={`${faceupName} lật trước mặt (bấm để xem)`}
+                      aria-label={`${faceupName} lật trước mặt`}
+                      onClick={() => onInspectCard?.(c)}
+                    >
+                      <span className="seat-peek-clip">
+                        <CardView card={c} small catalog={catalog} />
+                      </span>
+                    </button>
+                  )
+                })}
+              </div>
+            )}
             </div>
             {isPlaying && idx < list.length - 1 && (
               <span

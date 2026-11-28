@@ -65,13 +65,7 @@ export default function Home() {
           return
         }
         const maxPlayers = info.max_players ?? 9
-        if (info.started) {
-          const hasSession = !!store.get(`ek_session:${cleanCode}:${cleanName}`)
-          if (!hasSession) {
-            setError(`Phòng ${cleanCode} đã bắt đầu chơi (chỉ người chơi cũ mới kết nối lại được).`)
-            return
-          }
-        } else if ((info.player_count ?? 0) >= maxPlayers) {
+        if (!info.started && (info.player_count ?? 0) >= maxPlayers) {
           setError(`Phòng ${cleanCode} đã đầy (${info.player_count}/${maxPlayers}).`)
           return
         }
@@ -223,23 +217,30 @@ export default function Home() {
               <span className="section-count muted">{playingRooms.length}</span>
             </div>
             <ul className="room-list room-list-playing">
-              {playingRooms.map((r) => (
-                <li key={r.code}>
-                  <span className="code">{r.code}</span>
-                  <span className="count">
-                    <span className={`status-dot ${r.phase === 'ended' ? 'ended' : 'live'}`} aria-hidden="true" />
-                    {r.player_count ?? 0}/{r.max_players ?? 9} người · {r.phase === 'ended' ? 'Đã kết thúc' : 'Đang chơi'}
-                  </span>
-                  <button
-                    type="button"
-                    disabled={busy}
-                    title="Kết nối lại nếu bạn đã ở trong phòng này"
-                    onClick={() => joinCode(r.code, true)}
-                  >
-                    Kết nối lại
-                  </button>
-                </li>
-              ))}
+              {playingRooms.map((r) => {
+                const displayCode = r.display_code || r.code
+                const specCount = r.spectator_count ?? 0
+                return (
+                  <li key={r.code}>
+                    <span className="code">{displayCode}</span>
+                    <span className="count">
+                      <span className={`status-dot ${r.phase === 'ended' ? 'ended' : 'live'}`} aria-hidden="true" />
+                      {r.player_count ?? 0}/{r.max_players ?? 9} người
+                      {specCount > 0 ? ` · ${specCount} khán giả` : ''}
+                      {' · '}
+                      {r.phase === 'ended' ? 'Đã kết thúc' : r.phase === 'loading' ? 'Đang tải bài' : 'Đang chơi'}
+                    </span>
+                    <button
+                      type="button"
+                      disabled={busy}
+                      title="Vào xem ván đấu hoặc kết nối lại ghế cũ"
+                      onClick={() => joinCode(displayCode, true)}
+                    >
+                      Vào xem / Chơi lại
+                    </button>
+                  </li>
+                )
+              })}
             </ul>
           </div>
         )}

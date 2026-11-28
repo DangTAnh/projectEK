@@ -20,7 +20,7 @@ TURN_ENDING_TYPES = {
 }
 BLIND_BOMB_FATAL_TYPES = {
     "skip", "superskip", "reverse",
-    "attack2x", "targetattack2x", "attackofthedead",
+    "attack2x", "targetattack2x", "personalattack3x", "attackofthedead",
 }
 CLAIRVOYANCE_INSERT_REASONS = {"defuse", "defuse_receive", "zombie", "godcat_defuse"}
 LOG_BUFFER_MAX = 300
