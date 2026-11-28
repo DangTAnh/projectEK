@@ -205,6 +205,12 @@ export default function Room({ code }) {
   const [myAvatar, setMyAvatar] = useState(() => loadSavedAvatar(
     (new URLSearchParams(location.search).get('name') || store.get('ek_name')).trim(),
   ))
+
+  useEffect(() => {
+    if (!name) return
+    store.set('ek_name', name)
+    setMyAvatar(loadSavedAvatar(name))
+  }, [name])
   const [turnBanner, setTurnBanner] = useState(null)
   const [turnSecLeft, setTurnSecLeft] = useState(null)
   const [loadProgress, setLoadProgress] = useState({ loaded: 0, total: 0, done: false })

@@ -136,7 +136,13 @@ export default function Home() {
             aria-label="Tên của bạn"
             placeholder="Nhập tên hiển thị…"
             value={name}
-            onChange={(e) => { setName(e.target.value); if (error) setError('') }}
+            onChange={(e) => {
+              const next = e.target.value
+              setName(next)
+              if (next.trim()) store.set('ek_name', next)
+              else store.remove('ek_name')
+              if (error) setError('')
+            }}
             onKeyDown={(e) => { if (e.key === 'Enter' && !busy) onCreate() }}
             maxLength={64}
             autoFocus
