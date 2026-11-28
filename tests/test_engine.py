@@ -469,6 +469,20 @@ class TestFutureCards:
         g.respond(first, {"player": dead})  # hồi sinh dead
         assert "bomb_positions" not in g.view(watcher)["you"]
 
+    def test_bury_and_defuse_log_one_based_positions_while_protocol_is_zero_based(self):
+        g = make_game(2)
+        first, other = g.order[0], g.order[1]
+        top_card = g.debug_put_deck("skip", index=0)
+        give(g, first, "bury")
+        act(g, first, "bury")
+        assert g.pending["kind"] == "pick_index"
+        assert g.pending["data"]["min"] == 0
+        # index 0 = đỉnh (#1 từ đỉnh)
+        g.respond(first, {"index": 0})
+        assert g.deck.peek(1)[0].id == top_card.id
+        assert any("#1" in line for line in g.view(first)["log"])
+        assert not any("#1" in line for line in g.view(other)["log"])
+
     def test_digdeeper_keep(self):
         g = make_game(2)
         first = cur(g).name

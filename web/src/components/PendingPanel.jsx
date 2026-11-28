@@ -7,12 +7,12 @@ import { getCardMeta, getCardName } from '../utils/cardCatalog.js'
 const BOMB_INSERT_REASONS = new Set(['defuse', 'defuse_receive', 'zombie', 'imploding', 'godcat_defuse'])
 
 const REASON_TEXT = {
-  defuse: 'Chọn vị trí chèn Exploding Kitten (0 = đỉnh deck)',
-  defuse_receive: 'Nhận Exploding Kitten — chọn vị trí chèn lại vào deck (0 = đỉnh)',
-  zombie: 'Chèn bom lại vào deck (0 = đỉnh)',
-  imploding: 'Đặt Imploding Kitten trở lại deck (0 = đỉnh)',
-  godcat_defuse: 'Chèn bom lại vào deck (Godcat làm Defuse)',
-  bury: 'Chọn vị trí vùi lá vừa nhặt (0 = đỉnh)',
+  defuse: 'Chọn vị trí chèn Exploding Kitten (1 = đỉnh deck)',
+  defuse_receive: 'Nhận Exploding Kitten — chọn vị trí chèn lại vào deck (1 = đỉnh)',
+  zombie: 'Chèn bom lại vào deck (1 = đỉnh)',
+  imploding: 'Đặt Imploding Kitten trở lại deck (1 = đỉnh)',
+  godcat_defuse: 'Chèn bom lại vào deck (Godcat làm Defuse, 1 = đỉnh)',
+  bury: 'Chọn vị trí vùi lá vừa nhặt (1 = đỉnh)',
   favor: 'Ai phải đưa thẻ?',
   steal: 'Ăn trộm thẻ của ai?',
   call_card: 'Gọi tên thẻ của ai?',
@@ -67,6 +67,9 @@ export default function PendingPanel({
 
   const { kind, data = {} } = pending
   const isBombInsert = kind === 'pick_index' && BOMB_INSERT_REASONS.has(data.reason)
+  const displayMin = minVal + 1
+  const displayMax = maxVal + 1
+  const displayIdx = idx + 1
   const depthPct = maxVal > minVal ? Math.min(100, Math.max(0, ((idx - minVal) / (maxVal - minVal)) * 100)) : 0
   const respond = (payload) => {
     if (!connected) return
@@ -111,7 +114,7 @@ export default function PendingPanel({
                 disabled={!connected}
                 onClick={() => setIdx(minVal)}
               >
-                Đỉnh ({minVal})
+                Đỉnh ({displayMin})
               </button>
               {maxVal >= minVal + 1 && (
                 <button
@@ -120,7 +123,7 @@ export default function PendingPanel({
                   disabled={!connected}
                   onClick={() => setIdx(minVal + 1)}
                 >
-                  Thứ 2 ({minVal + 1})
+                  Thứ 2 ({displayMin + 1})
                 </button>
               )}
               {maxVal >= minVal + 2 && (
@@ -130,7 +133,7 @@ export default function PendingPanel({
                   disabled={!connected}
                   onClick={() => setIdx(minVal + 2)}
                 >
-                  Thứ 3 ({minVal + 2})
+                  Thứ 3 ({displayMin + 2})
                 </button>
               )}
               {maxVal > minVal && (
@@ -153,14 +156,14 @@ export default function PendingPanel({
                   disabled={!connected}
                   onClick={() => setIdx(maxVal)}
                 >
-                  Đáy ({maxVal})
+                  Đáy ({displayMax})
                 </button>
               )}
             </div>
             <div className={`depth-meter ${isBombInsert ? 'is-bomb' : ''}`} aria-hidden="true">
               <div className="depth-labels">
-                <span>TOP ({minVal})</span>
-                <span>BOTTOM ({maxVal})</span>
+                <span>TOP ({displayMin})</span>
+                <span>BOTTOM ({displayMax})</span>
               </div>
               <div className="depth-track">
                 <div className="depth-fill" style={{ width: `${depthPct}%` }} />
@@ -179,12 +182,12 @@ export default function PendingPanel({
               />
               <b>
                 {maxVal <= minVal
-                  ? 'Deck trống — đặt ở đỉnh (0)'
-                  : idx === 0
-                    ? 'Vị trí 0 / ' + maxVal + ' (Đỉnh — rút kế tiếp!)'
+                  ? `Deck trống — đặt ở đỉnh (${displayMin})`
+                  : idx === minVal
+                    ? `Vị trí ${displayIdx} / ${displayMax} (Đỉnh — rút kế tiếp!)`
                     : idx === maxVal
-                      ? `Vị trí ${idx} / ${maxVal} (Đáy deck)`
-                      : `Vị trí ${idx} / ${maxVal} từ đỉnh`}
+                      ? `Vị trí ${displayIdx} / ${displayMax} (Đáy deck)`
+                      : `Vị trí ${displayIdx} / ${displayMax} từ đỉnh`}
               </b>
               <button
                 type="button"

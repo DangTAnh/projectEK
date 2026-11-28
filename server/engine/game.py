@@ -2222,7 +2222,8 @@ class Game:
         index = max(0, min(int(resp.get("index", 0)), self.deck.size()))
         self.deck.insert(card, index)
         self._emit_fx("put_deck", actor=p.name, card_type="bury")
-        self._say(f"{p.name} vùi lặng 1 lá vào vị trí {index} từ đỉnh. Hết lượt!")
+        self._say(f"{p.name} vùi lặng 1 lá lại vào deck. Hết lượt!")
+        self._say(f"Bạn đã vùi lá vào vị trí #{index + 1} từ đỉnh deck.", private=p.name)
         self._after_one_draw(p, 1, end_after=True)
 
     def _share_show(self, p: Player) -> None:
