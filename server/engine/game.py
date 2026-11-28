@@ -31,9 +31,10 @@ class GameError(Exception):
 
 
 class Game:
-    def __init__(self, names: list[str], desk: str = "original") -> None:
+    def __init__(self, names: list[str], desk: str = "original", custom_desk: dict | None = None) -> None:
         self.names = list(names)
         self.desk_name = desk
+        self.custom_desk = copy.deepcopy(custom_desk) if custom_desk is not None else None
         self.players: dict[str, Player] = {n: Player(n) for n in names}
         self.order: list[str] = list(names)  # thứ tự lượt
         self.deck = Deck()
@@ -443,7 +444,10 @@ class Game:
     def start(self) -> None:
         """Chia bài: pool thường xáo -> mỗi người 4; +1 lá cứu/người; thừa về đáy; N-1 bom
         (N bom nếu deck có Streaking Kitten — cho phép 1 người ôm EK), giữ nguyên Imploding Kitten."""
-        self.deck.load_pool(self.desk_name)
+        if self.custom_desk is not None:
+            self.deck.load_pool_map(self.custom_desk["cards"])
+        else:
+            self.deck.load_pool(self.desk_name)
         imploding_kittens = [c for c in self.deck.cards if c.type == "implodingkitten"]
         for imp in imploding_kittens:
             imp.faceup = False

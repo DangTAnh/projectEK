@@ -1132,3 +1132,92 @@ def test_disconnect_empty_room_deleted_after_grace_and_cancelled_on_reconnect(mo
         assert code not in mgr.aliases
 
     asyncio.run(flow())
+
+
+def test_custom_desk_from_scratch_and_preset_play_and_rematch():
+    from server.engine.deck import desk_detail
+    from server.rooms import RoomManager
+
+    mgr = RoomManager()
+    code = mgr.create()
+    room = mgr.get(code)
+    assert room is not None
+
+    async def flow():
+        ws_a = StubSocket()
+        ws_b = StubSocket()
+        tok_a = await room.join("An", ws_a)
+        tok_b = await room.join("Binh", ws_b)
+
+        # Validation: quá ít lá hoặc sai preset bị từ chối
+        with pytest.raises(GameError, match="tối thiểu"):
+            await room.handle("An", {
+                "action": "save_custom_desk",
+                "title": "Quá ít",
+                "counts": {"skip": 2},
+            }, ws_a, tok_a)
+        with pytest.raises(GameError, match="preset"):
+            await room.handle("An", {
+                "action": "save_custom_desk",
+                "title": "Sai preset",
+                "preset": "khong-ton-tai",
+                "counts": {"skip": 12},
+            }, ws_a, tok_a)
+
+        # Tạo custom desk từ trống: cat được gom thành bộ 4 lá cùng biến thể để combo được
+        await room.handle("An", {
+            "action": "save_custom_desk",
+            "title": "Mèo Hỗn Chiến",
+            "counts": {"cat": 8, "skip": 4, "defuse": 2, "attack2x": 4},
+        }, ws_a, tok_a)
+        custom1 = room.custom_desks["custom:1"]
+        assert custom1["title"] == "Mèo Hỗn Chiến"
+        assert custom1["card_count"] == 18
+        assert all(cnt == 4 for cnt in custom1["cards"]["cat"].values())
+        assert room.votes["An"] == "custom:1"
+
+        # Tạo custom desk từ preset `original`, thêm 2 lá skip
+        orig = desk_detail("original")
+        tweaked_counts = dict(orig["counts"])
+        tweaked_counts.pop("explodingkitten", None)
+        tweaked_counts["skip"] = tweaked_counts.get("skip", 0) + 2
+        await room.handle("Binh", {
+            "action": "save_custom_desk",
+            "title": "Original Plus",
+            "preset": "original",
+            "counts": tweaked_counts,
+        }, ws_b, tok_b)
+        custom2 = room.custom_desks["custom:2"]
+        assert custom2["preset"] == "original"
+        assert custom2["counts"]["skip"] == orig["counts"]["skip"] + 2
+        assert room.votes["Binh"] == "custom:2"
+
+        # Người khác không sửa/xóa được custom desk của người tạo
+        with pytest.raises(GameError, match="người tạo"):
+            await room.handle("Binh", {
+                "action": "delete_custom_desk",
+                "id": "custom:1",
+            }, ws_b, tok_b)
+
+        # An xóa custom:1, cả Room vote custom:2 rồi bắt đầu với preload -> playing -> rematch
+        await room.handle("An", {"action": "delete_custom_desk", "id": "custom:1"}, ws_a, tok_a)
+        assert "custom:1" not in room.custom_desks
+        await room.handle("An", {"action": "vote_desk", "desk": "custom:2"}, ws_a, tok_a)
+        await room.handle("An", {"action": "start", "preload": True}, ws_a, tok_a)
+        assert room.current_phase() == "loading"
+        await room.handle("An", {"action": "assets_ready"}, ws_a, tok_a)
+        await room.handle("Binh", {"action": "assets_ready"}, ws_b, tok_b)
+        assert room.current_phase() == "playing"
+        assert room.game is not None
+        assert room.game.desk_name == "custom:2"
+        assert "🃏 Bộ bài: Original Plus" in room.game.log
+
+        # Về sảnh vẫn giữ lại custom desk đã tạo để chơi tiếp
+        room.game.phase = "ended"
+        room.game.winner = "An"
+        await room.handle("An", {"action": "return_lobby"}, ws_a, tok_a)
+        assert "custom:2" in room.custom_desks
+        assert any(d["id"] == "custom:2" for d in room._view_for("An")["custom_desks"])
+        room._cancel_timers()
+
+    asyncio.run(flow())

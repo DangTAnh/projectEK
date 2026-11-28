@@ -1,6 +1,7 @@
 import React, { useMemo, useState } from 'react'
 import RealIcon from './RealIcon.jsx'
 import CatAvatar from './CatAvatar.jsx'
+import CustomDeskModal from './CustomDeskModal.jsx'
 
 const FALLBACK_META = {
   original: {
@@ -53,47 +54,79 @@ export default function LobbyPanel({
   code,
   players = [],
   desks = [],
+  customDesks = [],
+  catalog = {},
   votes = {},
   name,
   connected,
   onVoteDesk,
+  onSaveCustomDesk = null,
+  onDeleteCustomDesk = null,
   onStart,
   onCopyCode,
   onCopyLink,
   onEditAvatar = null,
 }) {
   const [filter, setFilter] = useState('all')
+  const [customModal, setCustomModal] = useState(null) // { mode, preset, desk }
   const canStart = players.length >= 2 && connected
 
-  const normalizedDesks = useMemo(
+  const normalizedPresets = useMemo(
     () => (Array.isArray(desks) ? desks : []).map(normalizeDesk).filter((d) => d.id),
     [desks],
+  )
+
+  const normalizedCustom = useMemo(
+    () => (Array.isArray(customDesks) ? customDesks : []).map((raw) => ({
+      id: String(raw?.id || '').trim(),
+      title: String(raw?.title || 'Custom Desk').trim(),
+      deck_type: 'Custom',
+      isCustom: true,
+      isExpansion: false,
+      base_merged: false,
+      preset: raw?.preset || null,
+      created_by: raw?.created_by || '',
+      card_count: Number.isFinite(Number(raw?.card_count)) ? Number(raw.card_count) : null,
+      expansion_card_count: null,
+      description: String(raw?.description || '').trim(),
+      theme_color: String(raw?.theme_color || '#f25c3b').trim(),
+      counts: raw?.counts || {},
+    })).filter((d) => d.id),
+    [customDesks],
+  )
+
+  const allDesks = useMemo(
+    () => [...normalizedCustom, ...normalizedPresets],
+    [normalizedCustom, normalizedPresets],
   )
 
   const counts = useMemo(() => {
     let standalone = 0
     let expansion = 0
-    for (const d of normalizedDesks) {
+    for (const d of normalizedPresets) {
       if (d.isExpansion) expansion += 1
       else standalone += 1
     }
     return {
-      all: normalizedDesks.length,
+      all: allDesks.length,
       Standalone: standalone,
       Expansion: expansion,
+      Custom: normalizedCustom.length,
     }
-  }, [normalizedDesks])
+  }, [allDesks.length, normalizedPresets, normalizedCustom.length])
 
   const filteredDesks = useMemo(() => {
-    if (filter === 'Standalone') return normalizedDesks.filter((d) => !d.isExpansion)
-    if (filter === 'Expansion') return normalizedDesks.filter((d) => d.isExpansion)
-    return normalizedDesks
-  }, [normalizedDesks, filter])
+    if (filter === 'Custom') return normalizedCustom
+    if (filter === 'Standalone') return normalizedPresets.filter((d) => !d.isExpansion)
+    if (filter === 'Expansion') return normalizedPresets.filter((d) => d.isExpansion)
+    return allDesks
+  }, [allDesks, normalizedPresets, normalizedCustom, filter])
 
   const filterTabs = [
     { key: 'all', label: `Tất cả (${counts.all})` },
     { key: 'Standalone', label: `Standalone (${counts.Standalone})` },
     { key: 'Expansion', label: `Expansion (${counts.Expansion})` },
+    ...(counts.Custom > 0 ? [{ key: 'Custom', label: `Custom (${counts.Custom})` }] : []),
   ]
 
   return (
@@ -189,69 +222,149 @@ export default function LobbyPanel({
                 <span>Chọn bộ bài</span>
                 <span className="desk-hint">Bỏ trống để chọn ngẫu nhiên</span>
               </div>
-              <div className="desk-filter-tabs" role="tablist" aria-label="Lọc loại bộ bài">
-                {filterTabs.map((tab) => (
+              <div className="desk-head-controls">
+                <div className="desk-filter-tabs" role="tablist" aria-label="Lọc loại bộ bài">
+                  {filterTabs.map((tab) => (
+                    <button
+                      key={tab.key}
+                      type="button"
+                      role="tab"
+                      aria-selected={filter === tab.key}
+                      className={`desk-filter-tab ${filter === tab.key ? 'active' : ''}`}
+                      onClick={() => setFilter(tab.key)}
+                    >
+                      {tab.label}
+                    </button>
+                  ))}
+                </div>
+                {onSaveCustomDesk && (
                   <button
-                    key={tab.key}
                     type="button"
-                    role="tab"
-                    aria-selected={filter === tab.key}
-                    className={`desk-filter-tab ${filter === tab.key ? 'active' : ''}`}
-                    onClick={() => setFilter(tab.key)}
+                    className="lobby-custom-btn"
+                    disabled={!connected}
+                    onClick={() => setCustomModal({ mode: 'new', preset: '', desk: null })}
                   >
-                    {tab.label}
+                    + Custom Desk
                   </button>
-                ))}
+                )}
               </div>
             </div>
             <div className="desk-votes">
               {filteredDesks.map((d) => {
                 const voters = Object.entries(votes || {}).filter(([, v]) => v === d.id).map(([n]) => n)
                 const mine = voters.includes(name)
-                const typeLabel = d.isExpansion
-                  ? (d.base_merged ? 'Expansion + Base' : 'Expansion')
-                  : 'Standalone'
+                const typeLabel = d.isCustom
+                  ? 'Custom'
+                  : d.isExpansion
+                    ? (d.base_merged ? 'Expansion + Base' : 'Expansion')
+                    : 'Standalone'
+                const typeClass = d.isCustom ? 'custom' : d.isExpansion ? 'expansion' : 'standalone'
                 const countHint = d.isExpansion && d.expansion_card_count
                   ? `${d.expansion_card_count} lá mở rộng + bộ gốc`
                   : undefined
+                const canEditCustom = d.isCustom && d.created_by === name
                 return (
-                  <button
+                  <div
                     key={d.id}
-                    type="button"
-                    className={`desk-card ${mine ? 'mine' : ''}`}
+                    className={`desk-card ${mine ? 'mine' : ''} ${d.isCustom ? 'is-custom' : ''}`}
                     style={d.theme_color ? { '--desk-accent': d.theme_color } : undefined}
-                    disabled={!connected}
-                    title={voters.length ? `${d.description} (Đã vote: ${voters.join(', ')})` : d.description}
-                    onClick={() => onVoteDesk(d.id)}
                   >
-                    <div className="desk-card-top">
-                      <span className="desk-card-name">{d.title}</span>
-                      {voters.length > 0 && <span className="desk-vote-badge">{voters.length}</span>}
-                    </div>
-                    <div className="desk-card-meta">
-                      <span className={`desk-type-badge ${d.isExpansion ? 'expansion' : 'standalone'}`}>
-                        {typeLabel}
-                      </span>
-                      {d.card_count !== null && (
-                        <span className="desk-count-badge" title={countHint}>
-                          {d.card_count} lá
+                    <button
+                      type="button"
+                      className="desk-card-main"
+                      disabled={!connected}
+                      title={voters.length ? `${d.description} (Đã vote: ${voters.join(', ')})` : d.description}
+                      onClick={() => onVoteDesk(d.id)}
+                    >
+                      <div className="desk-card-top">
+                        <span className="desk-card-name">{d.title}</span>
+                        <span className="desk-card-badges">
+                          {voters.length > 0 && <span className="desk-vote-badge">{voters.length}</span>}
                         </span>
-                      )}
-                    </div>
-                    <span className="desk-card-desc">
-                      {d.description}
-                    </span>
-                  </button>
+                      </div>
+                      <div className="desk-card-meta">
+                        <span className={`desk-type-badge ${typeClass}`}>
+                          {typeLabel}
+                        </span>
+                        {d.card_count !== null && (
+                          <span className="desk-count-badge" title={countHint}>
+                            {d.card_count} lá
+                          </span>
+                        )}
+                      </div>
+                      <span className="desk-card-desc">
+                        {d.description}
+                      </span>
+                    </button>
+
+                    {onSaveCustomDesk && (
+                      <div className="desk-mini-actions">
+                        {d.isCustom ? (
+                          <>
+                            <button
+                              type="button"
+                              className="desk-mini-btn"
+                              disabled={!connected}
+                              title={canEditCustom ? 'Chỉnh sửa Custom Desk' : 'Nhân bản thành Custom Desk mới'}
+                              onClick={() => setCustomModal({
+                                mode: canEditCustom ? 'edit' : 'clone',
+                                preset: d.preset || '',
+                                desk: d,
+                              })}
+                            >
+                              {canEditCustom ? 'Sửa' : 'Nhân bản'}
+                            </button>
+                            {canEditCustom && onDeleteCustomDesk && (
+                              <button
+                                type="button"
+                                className="desk-mini-btn danger"
+                                disabled={!connected}
+                                title="Xóa Custom Desk này"
+                                aria-label={`Xóa ${d.title}`}
+                                onClick={() => onDeleteCustomDesk(d.id)}
+                              >
+                                ✕
+                              </button>
+                            )}
+                          </>
+                        ) : (
+                          <button
+                            type="button"
+                            className="desk-mini-btn"
+                            disabled={!connected}
+                            title={`Tạo Custom Desk từ preset ${d.title}`}
+                            onClick={() => setCustomModal({ mode: 'preset', preset: d.id, desk: null })}
+                          >
+                            Từ preset
+                          </button>
+                        )}
+                      </div>
+                    )}
+                  </div>
                 )
               })}
-              {normalizedDesks.length === 0 && <span className="desk-hint">Đang tải danh sách bộ bài…</span>}
-              {normalizedDesks.length > 0 && filteredDesks.length === 0 && (
+              {allDesks.length === 0 && <span className="desk-hint">Đang tải danh sách bộ bài…</span>}
+              {allDesks.length > 0 && filteredDesks.length === 0 && (
                 <span className="desk-hint">Không có bộ bài nào trong mục này.</span>
               )}
             </div>
           </div>
         </div>
       </div>
+
+      <CustomDeskModal
+        open={Boolean(customModal)}
+        catalog={catalog}
+        presets={normalizedPresets}
+        initialMode={customModal?.mode || 'new'}
+        initialPreset={customModal?.preset || ''}
+        initialDesk={customModal?.desk || null}
+        onClose={() => setCustomModal(null)}
+        onSave={(payload) => {
+          onSaveCustomDesk?.(payload)
+          setCustomModal(null)
+        }}
+      />
     </section>
   )
 }

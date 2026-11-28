@@ -44,6 +44,12 @@ def test_rest_desks_and_desk_details():
         assert isinstance(meta["card_count"], int) and meta["card_count"] > 0
         assert isinstance(meta["deck_type"], str) and meta["deck_type"]
 
+    detail = client.get("/api/desks/original").json()
+    assert detail["id"] == "original"
+    assert isinstance(detail["cards"], dict)
+    assert detail["counts"]["skip"] == 4
+    assert client.get("/api/desks/does-not-exist").status_code == 404
+
 
 def test_ws_lobby_and_start():
     from server.rooms import MANAGER

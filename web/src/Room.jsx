@@ -1565,10 +1565,14 @@ export default function Room({ code }) {
           code={roomCodeDisplay}
           players={view.players}
           desks={desks}
+          customDesks={view.custom_desks}
+          catalog={catalog}
           votes={view.votes}
           name={name}
           connected={connected}
           onVoteDesk={(desk) => send({ action: 'vote_desk', desk })}
+          onSaveCustomDesk={(payload) => send({ action: 'save_custom_desk', ...payload, vote: true })}
+          onDeleteCustomDesk={(id) => send({ action: 'delete_custom_desk', id })}
           onStart={() => send({ action: 'start', preload: true })}
           onCopyCode={handleCopyCode}
           onCopyLink={handleCopyLink}

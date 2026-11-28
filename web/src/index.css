@@ -753,6 +753,21 @@ button.leave:hover:not(:disabled) {
 .desk-head-title {
   display: inline-flex; align-items: baseline; gap: 8px; flex-wrap: wrap;
 }
+.desk-head-controls {
+  display: inline-flex; align-items: center; gap: 8px; flex-wrap: wrap;
+}
+.lobby-custom-btn {
+  padding: 4px 10px; border-radius: 999px;
+  font-size: 11px; font-weight: 800;
+  background: rgba(242, 92, 59, 0.16);
+  border: 1px solid rgba(242, 92, 59, 0.48);
+  color: var(--text);
+  text-transform: none; letter-spacing: 0; line-height: 1.2;
+}
+.lobby-custom-btn:hover:not(:disabled) {
+  background: rgba(242, 92, 59, 0.28);
+  border-color: var(--brand);
+}
 .desk-filter-tabs {
   display: inline-flex; align-items: center; gap: 4px;
   padding: 3px; border-radius: 999px;
@@ -870,16 +885,21 @@ button.leave:hover:not(:disabled) {
   grid-template-columns: repeat(3, minmax(0, 1fr));
   gap: 8px;
   align-content: start;
+  max-height: calc(100dvh - 210px);
+  overflow-y: auto;
+  padding-top: 2px;
 }
 .desk-card {
-  display: flex; flex-direction: column; align-items: stretch; gap: 4px;
-  padding: 8px 10px 8px 12px; border-radius: 10px; text-align: left;
+  position: relative;
+  display: flex; flex-direction: column;
+  border-radius: 10px;
   background: var(--surface-2);
   border: 1px solid var(--line);
   border-left: 3px solid var(--desk-accent, rgba(255, 238, 218, 0.22));
   min-width: 0;
+  transition: border-color 0.15s ease, background-color 0.15s ease, transform 0.14s ease;
 }
-.desk-card:hover:not(:disabled) {
+.desk-card:hover {
   border-color: rgba(255, 238, 218, 0.25);
   border-left-color: var(--desk-accent, var(--brand));
   background: var(--surface-3);
@@ -890,6 +910,18 @@ button.leave:hover:not(:disabled) {
   border-left-color: var(--brand);
   box-shadow: 0 0 0 1px rgba(242, 92, 59, 0.24);
 }
+.desk-card-main {
+  display: flex; flex-direction: column; align-items: stretch; gap: 4px;
+  width: 100%; padding: 8px 10px 8px 12px;
+  border: none; border-radius: 10px;
+  background: transparent; text-align: left;
+  color: inherit;
+}
+.desk-card-main:hover:not(:disabled) {
+  background: transparent;
+  border-color: transparent;
+  transform: none;
+}
 .desk-card-top {
   width: 100%; display: flex; align-items: center; justify-content: space-between; gap: 6px;
 }
@@ -899,10 +931,44 @@ button.leave:hover:not(:disabled) {
   overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
 }
 .desk-card.mine .desk-card-name { color: var(--text); }
+.desk-card-badges {
+  display: inline-flex; align-items: center; gap: 4px; flex: none;
+}
 .desk-vote-badge {
   flex: none;
   font-size: 10.5px; font-weight: 800; padding: 1px 7px; border-radius: 999px;
   background: var(--brand); color: #ffffff;
+}
+.desk-mini-actions {
+  position: absolute; top: 6px; right: 7px;
+  display: inline-flex; align-items: center; gap: 3px;
+  opacity: 0; transition: opacity 0.14s ease;
+  z-index: 2;
+}
+.desk-card:hover .desk-mini-actions,
+.desk-card:focus-within .desk-mini-actions {
+  opacity: 1;
+}
+.desk-card:hover .desk-card-badges,
+.desk-card:focus-within .desk-card-badges {
+  opacity: 0;
+}
+.desk-mini-btn {
+  padding: 2px 6px; border-radius: 6px;
+  font-size: 10px; font-weight: 800; line-height: 1.2;
+  background: #1d1815;
+  border: 1px solid var(--line-strong);
+  color: var(--text);
+}
+.desk-mini-btn:hover:not(:disabled) {
+  background: var(--brand);
+  border-color: var(--brand);
+  color: #ffffff;
+  transform: none;
+}
+.desk-mini-btn.danger:hover:not(:disabled) {
+  background: var(--danger);
+  border-color: var(--danger);
 }
 .desk-card-meta {
   display: flex; align-items: center; gap: 5px; flex-wrap: wrap;
@@ -924,6 +990,16 @@ button.leave:hover:not(:disabled) {
   border: 1px solid rgba(242, 92, 59, 0.36);
   color: #ff9a7e;
 }
+.desk-type-badge.custom {
+  background: rgba(52, 199, 123, 0.15);
+  border: 1px solid rgba(52, 199, 123, 0.42);
+  color: #8be6b3;
+}
+@media (hover: none) {
+  .desk-mini-actions { opacity: 0.92; }
+  .desk-card:hover .desk-card-badges { opacity: 1; }
+}
+
 .desk-count-badge {
   background: rgba(255, 238, 218, 0.05);
   border: 1px solid var(--line);

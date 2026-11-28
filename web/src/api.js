@@ -85,6 +85,12 @@ export async function listDeskDetails() {
   return ids.map((item) => (typeof item === 'string' ? { id: item, title: item } : item))
 }
 
+export async function getDeskDetail(desk) {
+  const r = await fetch(`/api/desks/${encodeURIComponent(desk)}`)
+  if (!r.ok) throw await parseApiError(r, `Không tải được chi tiết bộ bài ${desk}`)
+  return r.json()
+}
+
 export async function listCards() {
   const r = await fetch('/api/cards')
   if (!r.ok) return null

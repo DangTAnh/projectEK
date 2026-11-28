@@ -14,7 +14,7 @@ from fastapi.staticfiles import StaticFiles
 
 from .engine import CARD_META, GameError
 from .engine.cards import GODCAT_BANNED
-from .engine.deck import available_desks, desk_catalog
+from .engine.deck import available_desks, desk_catalog, desk_detail
 from .rooms import (
     AUTH_CLOSE_CODE,
     MANAGER,
@@ -228,6 +228,16 @@ async def list_desks() -> list[str]:
 @app.get("/api/desks/details")
 async def list_desk_details() -> list[dict]:
     return desk_catalog()
+
+
+@app.get("/api/desks/{desk}")
+async def get_desk(desk: str) -> JSONResponse:
+    if desk not in available_desks():
+        return JSONResponse(
+            {"code": "DESK_NOT_FOUND", "message": f"Không có bộ bài {desk}"},
+            status_code=404,
+        )
+    return JSONResponse(desk_detail(desk))
 
 
 @app.get("/api/desks/{desk}/images")

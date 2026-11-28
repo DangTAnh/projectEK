@@ -13,12 +13,17 @@ from collections import Counter
 from fastapi import WebSocket
 
 from .engine import Game, GameError
-from .engine.deck import DESK_DIR, available_desks
+from .engine.cards import CARD_META
+from .engine.deck import DESK_DIR, available_desks, desk_detail
 
 logger = logging.getLogger(__name__)
 
 MAX_PLAYERS = 9
 MAX_SPECTATORS = 20
+MAX_CUSTOM_DESKS = 12
+MAX_CUSTOM_CARD_TOTAL = 200
+MIN_CUSTOM_NONBOMB_CARDS = 10
+MAX_PER_CARD_TYPE = 30
 NOPE_SECONDS = 2
 _INITIAL_TURN_SECONDS = float(os.environ.get("ROOM_TURN_SECONDS", "30"))
 TURN_SECONDS = _INITIAL_TURN_SECONDS
@@ -52,7 +57,7 @@ def _turn_seconds() -> float:
     return max(0.01, float(TURN_SECONDS))
 
 
-def desk_image_urls(desk: str) -> list[str]:
+def desk_image_urls(desk: str, custom_cards: dict | None = None) -> list[str]:
     """Liệt kê URL ảnh lá bài (và mặt sau) cần preload cho bộ bài desk."""
     urls: list[str] = []
     seen: set[str] = set()
@@ -70,14 +75,17 @@ def desk_image_urls(desk: str) -> list[str]:
             add_url(f"/static/cards/{ctype}/0.jpg")
 
     add_url("/backside.jpg")
-    desk_path = DESK_DIR / f"{desk}.json"
     cards_map: dict[str, dict] = {}
-    try:
-        data = json.loads(desk_path.read_text(encoding="utf-8"))
-        if isinstance(data, dict) and isinstance(data.get("cards"), dict):
-            cards_map = data["cards"]
-    except (OSError, ValueError):
-        cards_map = {}
+    if isinstance(custom_cards, dict):
+        cards_map = custom_cards
+    else:
+        desk_path = DESK_DIR / f"{desk}.json"
+        try:
+            data = json.loads(desk_path.read_text(encoding="utf-8"))
+            if isinstance(data, dict) and isinstance(data.get("cards"), dict):
+                cards_map = data["cards"]
+        except (OSError, ValueError):
+            cards_map = {}
 
     for ctype, variants in cards_map.items():
         if not isinstance(variants, dict):
@@ -122,6 +130,176 @@ def sanitize_avatar(raw) -> dict[str, str]:
     if not clean:
         raise GameError("Avatar không hợp lệ")
     return clean
+
+
+def _card_variants(ctype: str) -> list[int]:
+    try:
+        files = (CARDS_DIR / ctype).glob("*.jpg")
+        found = sorted(int(p.stem) for p in files if p.stem.isdigit())
+        return found or [0]
+    except OSError:
+        return [0]
+
+
+def _distribute_card_variants(
+    ctype: str,
+    count: int,
+    base_variants: dict | None = None,
+) -> dict[str, int]:
+    """Phân bổ số lượng lá vào các biến thể artwork; giữ nguyên biến thể preset nếu khớp."""
+    if count <= 0:
+        return {}
+    if isinstance(base_variants, dict):
+        clean_base: dict[str, int] = {}
+        for var, cnt in base_variants.items():
+            try:
+                v_int = int(var)
+                c_int = int(cnt)
+            except (TypeError, ValueError):
+                continue
+            if c_int > 0:
+                clean_base[str(v_int)] = c_int
+        if sum(clean_base.values()) == count:
+            return clean_base
+
+    variants = _card_variants(ctype)
+    out: dict[str, int] = {}
+    if isinstance(base_variants, dict):
+        for var, cnt in base_variants.items():
+            try:
+                v_str = str(int(var))
+                c_int = int(cnt)
+            except (TypeError, ValueError):
+                continue
+            if c_int > 0:
+                out[v_str] = c_int
+
+    cur = sum(out.values())
+    if cur > count:
+        # Giảm bớt từ các biến thể cuối về 0
+        for v_str in list(reversed(list(out.keys()))):
+            if cur <= count:
+                break
+            take = min(out[v_str], cur - count)
+            out[v_str] -= take
+            cur -= take
+            if out[v_str] <= 0:
+                del out[v_str]
+        return out
+
+    # Tăng thêm: riêng `cat` gom theo bộ 4 lá cùng biến thể để đánh được combo
+    if ctype == "cat":
+        idx = 0
+        while cur < count:
+            v_str = str(variants[idx % len(variants)])
+            room_in_group = max(1, 4 - (out.get(v_str, 0) % 4))
+            add = min(count - cur, room_in_group)
+            out[v_str] = out.get(v_str, 0) + add
+            cur += add
+            idx += 1
+        return out
+
+    idx = 0
+    while cur < count:
+        v_str = str(variants[idx % len(variants)])
+        out[v_str] = out.get(v_str, 0) + 1
+        cur += 1
+        idx += 1
+    return out
+
+
+def build_custom_desk_spec(raw: dict, *, creator: str, desk_id: str) -> dict:
+    """Validate và dựng custom desk hoàn chỉnh từ counts hoặc từ một preset."""
+    if not isinstance(raw, dict):
+        raise GameError("Dữ liệu Custom Desk không hợp lệ")
+    raw_title = raw.get("title")
+    title = raw_title.strip() if isinstance(raw_title, str) else ""
+    if not title or len(title) > 40:
+        raise GameError("Tên bộ bài phải từ 1 đến 40 ký tự")
+
+    raw_preset = raw.get("preset")
+    preset: str | None = None
+    preset_detail: dict | None = None
+    if raw_preset is not None and raw_preset != "":
+        if not isinstance(raw_preset, str) or raw_preset not in available_desks():
+            raise GameError(f"Không có bộ bài preset '{raw_preset}'")
+        preset = raw_preset
+        preset_detail = desk_detail(preset)
+
+    raw_counts = raw.get("counts")
+    raw_cards = raw.get("cards")
+    if not isinstance(raw_counts, dict) and isinstance(raw_cards, dict):
+        raw_counts = {
+            ctype: sum(int(cnt) for cnt in variants.values())
+            for ctype, variants in raw_cards.items()
+            if isinstance(variants, dict)
+        }
+    if not isinstance(raw_counts, dict):
+        raise GameError("Thiếu danh sách số lượng lá bài")
+
+    preset_cards = preset_detail.get("cards", {}) if preset_detail else {}
+    cards_map: dict[str, dict[str, int]] = {}
+    counts: dict[str, int] = {}
+    non_bomb_total = 0
+    grand_total = 0
+
+    for ctype, raw_cnt in raw_counts.items():
+        if not isinstance(ctype, str) or ctype not in CARD_META:
+            raise GameError(f"Loại thẻ không hợp lệ: {ctype}")
+        if isinstance(raw_cnt, bool):
+            raise GameError(f"Số lượng thẻ '{ctype}' không hợp lệ")
+        try:
+            cnt = int(raw_cnt)
+        except (TypeError, ValueError):
+            raise GameError(f"Số lượng thẻ '{ctype}' không hợp lệ") from None
+        if cnt < 0 or cnt > MAX_PER_CARD_TYPE:
+            raise GameError(f"Số lượng '{ctype}' phải từ 0 đến {MAX_PER_CARD_TYPE}")
+        if ctype == "explodingkitten":
+            # Game.start() tự chèn N-1/N Exploding Kitten theo số người chơi
+            continue
+        if cnt == 0:
+            continue
+        base_vars = (
+            raw_cards.get(ctype)
+            if isinstance(raw_cards, dict) and isinstance(raw_cards.get(ctype), dict)
+            else preset_cards.get(ctype)
+        )
+        cards_map[ctype] = _distribute_card_variants(ctype, cnt, base_vars)
+        counts[ctype] = cnt
+        grand_total += cnt
+        if ctype != "implodingkitten":
+            non_bomb_total += cnt
+
+    if non_bomb_total < MIN_CUSTOM_NONBOMB_CARDS:
+        raise GameError(f"Bộ bài cần tối thiểu {MIN_CUSTOM_NONBOMB_CARDS} lá thường")
+    if grand_total > MAX_CUSTOM_CARD_TOTAL:
+        raise GameError(f"Bộ bài không được vượt quá {MAX_CUSTOM_CARD_TOTAL} lá")
+
+    raw_desc = raw.get("description")
+    if isinstance(raw_desc, str) and raw_desc.strip():
+        description = raw_desc.strip()[:140]
+    elif preset_detail:
+        description = f"Tùy chỉnh từ {preset_detail['title']} · bởi {creator}"
+    else:
+        description = f"Bộ bài tự tạo ({grand_total} lá) · bởi {creator}"
+
+    theme_color = (
+        preset_detail.get("theme_color")
+        if preset_detail and preset_detail.get("theme_color")
+        else "#f25c3b"
+    )
+    return {
+        "id": desk_id,
+        "title": title,
+        "deck_type": "Custom",
+        "preset": preset,
+        "created_by": creator,
+        "card_count": grand_total,
+        "description": description,
+        "theme_color": theme_color,
+        "counts": counts,
+        "cards": cards_map,
+    }
 CODE_ALPHABET = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789"  # bỏ I/1/O/0
 
 
@@ -169,6 +347,8 @@ class Room:
         self.real_code = code
         self._manager = manager
         self.votes: dict[str, str] = {}  # name -> desk được vote (lobby)
+        self.custom_desks: dict[str, dict] = {}  # id -> custom desk spec trong phòng
+        self._custom_desk_seq: int = 0
         self.avatars: dict[str, dict[str, str]] = {}  # name -> cấu hình mèo tuỳ chỉnh
         self.game: Game | None = None
         self.conns: dict[str, WebSocket] = {}  # name -> ws hiện tại
@@ -487,6 +667,10 @@ class Room:
                 "deck_count": 0,
                 "stash_count": 0,
                 "votes": dict(self.votes),
+                "custom_desks": [
+                    {k: v for k, v in d.items() if k != "cards"}
+                    for d in self.custom_desks.values()
+                ],
                 "you": {
                     "name": name,
                     "alive": not is_spec,
@@ -522,6 +706,10 @@ class Room:
                 "deck_count": 0,
                 "stash_count": 0,
                 "votes": dict(self.votes),
+                "custom_desks": [
+                    {k: v for k, v in d.items() if k != "cards"}
+                    for d in self.custom_desks.values()
+                ],
                 "you": {
                     "name": name,
                     "alive": True,
@@ -888,11 +1076,48 @@ class Room:
                 return
             if act == "vote_desk":
                 desk = msg.get("desk") or ""
-                if desk not in available_desks():
+                if desk not in available_desks() and desk not in self.custom_desks:
                     raise GameError(f"Không có bộ bài {desk}")
                 if not self.is_started():
                     self.votes[clean] = desk
                     await self._broadcast_locked()
+                return
+            if act == "save_custom_desk":
+                if self.is_started():
+                    raise GameError("Không thể chỉnh sửa bộ bài khi ván đã bắt đầu")
+                raw_id = msg.get("id")
+                if raw_id is not None and raw_id != "":
+                    if not isinstance(raw_id, str) or raw_id not in self.custom_desks:
+                        raise GameError("Không tìm thấy bộ bài tùy chỉnh cần sửa")
+                    if self.custom_desks[raw_id].get("created_by") != clean:
+                        raise GameError("Chỉ người tạo mới có thể sửa bộ bài này")
+                    desk_id = raw_id
+                    next_seq = self._custom_desk_seq
+                else:
+                    if len(self.custom_desks) >= MAX_CUSTOM_DESKS:
+                        raise GameError(f"Mỗi phòng chỉ lưu tối đa {MAX_CUSTOM_DESKS} bộ bài tùy chỉnh")
+                    next_seq = self._custom_desk_seq + 1
+                    desk_id = f"custom:{next_seq}"
+                spec = build_custom_desk_spec(msg, creator=clean, desk_id=desk_id)
+                self._custom_desk_seq = next_seq
+                self.custom_desks[desk_id] = spec
+                if msg.get("vote", True):
+                    self.votes[clean] = desk_id
+                await self._broadcast_locked()
+                return
+            if act == "delete_custom_desk":
+                if self.is_started():
+                    raise GameError("Không thể xóa bộ bài khi ván đã bắt đầu")
+                desk_id = self._need_text(msg, "id")
+                existing = self.custom_desks.get(desk_id)
+                if existing is None:
+                    raise GameError("Không tìm thấy bộ bài tùy chỉnh")
+                if existing.get("created_by") != clean:
+                    raise GameError("Chỉ người tạo mới có thể xóa bộ bài này")
+                del self.custom_desks[desk_id]
+                for voter in [v for v, voted in self.votes.items() if voted == desk_id]:
+                    del self.votes[voter]
+                await self._broadcast_locked()
                 return
             if act == "set_avatar":
                 clean_avatar = sanitize_avatar(msg.get("avatar"))
@@ -960,11 +1185,15 @@ class Room:
 
     def _pick_desk(self, preferred_desk: str | None = None) -> str:
         desks = available_desks()
-        if not desks:
+        if not desks and not self.custom_desks:
             raise GameError("Chưa có bộ bài nào")
-        if self.votes:  # desk được vote nhiều nhất; hoà thì cái đầu tiên
-            return Counter(self.votes.values()).most_common(1)[0][0]
-        if preferred_desk and preferred_desk in desks:
+        valid_votes = [
+            d for d in self.votes.values()
+            if d in desks or d in self.custom_desks
+        ]
+        if valid_votes:  # desk được vote nhiều nhất; hoà thì cái đầu tiên
+            return Counter(valid_votes).most_common(1)[0][0]
+        if preferred_desk and (preferred_desk in desks or preferred_desk in self.custom_desks):
             return preferred_desk
         return random.choice(desks)
 
@@ -984,7 +1213,8 @@ class Room:
         if not (2 <= len(players) <= MAX_PLAYERS):
             raise GameError("Cần 2–9 người trong phòng")
         desk = self._pick_desk(preferred_desk)
-        images = desk_image_urls(desk)
+        custom = self.custom_desks.get(desk)
+        images = desk_image_urls(desk, custom_cards=custom["cards"] if custom else None)
         self._cancel_timers()
         if is_rematch:
             self._rotate_rematch_code()
@@ -1030,10 +1260,11 @@ class Room:
         if not (2 <= len(names) <= MAX_PLAYERS):
             raise GameError("Cần 2–9 người trong phòng")
         desk = forced_desk or self._pick_desk(preferred_desk)
+        custom = self.custom_desks.get(desk)
         # dựng + chia bài xong mới gán: start() hỏng thì lobby/vote còn nguyên
-        game = Game(names, desk=desk)
+        game = Game(names, desk=desk, custom_desk=custom)
         game.start()
-        game.announce_desk(desk)
+        game.announce_desk(custom["title"] if custom else desk)
         self._cancel_timers()
         if rotate_code:
             self._rotate_rematch_code()
