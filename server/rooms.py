@@ -26,6 +26,7 @@ LOADING_TIMEOUT_SECONDS = 15.0
 SEND_TIMEOUT = 5.0
 MAX_ROOMS = 500
 EMPTY_LOBBY_TTL_SECONDS = 300
+EMPTY_DISCONNECT_TTL_SECONDS = 5.0
 LOBBY_TTL_SECONDS = 3600
 GAME_TTL_SECONDS = 900
 LOBBY_SESSION_TTL_SECONDS = 120
@@ -183,9 +184,17 @@ class Room:
         self._turn_timer_seq: int = 0
         self._loading: dict | None = None
         self._loading_task: asyncio.Task | None = None
+        self._empty_since: float | None = None
+        self._empty_seq: int = 0
+        self._empty_task: asyncio.Task | None = None
 
     def touch(self) -> None:
         self.last_active = time.time()
+
+    def _mark_occupied(self) -> None:
+        self._empty_since = None
+        self._empty_seq += 1
+        self._cancel_empty_timer()
 
     def _is_spectator(self, name: str) -> bool:
         if self.game is not None:
@@ -278,6 +287,7 @@ class Room:
                 # chủ token cũ nhận lại ghế: giữ nguyên token
                 self._disconnected_at.pop(clean, None)
                 self.conns[clean] = ws
+                self._mark_occupied()
                 self._sync_spectators_set()
                 return self.sessions[clean]
 
@@ -287,12 +297,14 @@ class Room:
             self._disconnected_at.pop(clean, None)
             self.sessions[clean] = token
             self.conns[clean] = ws
+            self._mark_occupied()
             self._sync_spectators_set()
             return token
         if session is not None and session == self.sessions.get(clean):
             old = current
             self._disconnected_at.pop(clean, None)
             self.conns[clean] = ws
+            self._mark_occupied()
             self._sync_spectators_set()
             if old is not None and old is not ws:
                 self._close_later(old, TAKEOVER_CLOSE_CODE)
@@ -306,6 +318,8 @@ class Room:
             del self.conns[clean]
             self.spectators.discard(clean)
             self.touch()
+            if not self.conns:
+                self._empty_since = time.time()
             if self.game is None and self._loading is None:
                 # Rời lobby hẳn thì vote cũ không còn hiệu lực.
                 self.votes.pop(clean, None)
@@ -338,6 +352,8 @@ class Room:
         async with self._lock:
             if not self.leave(name, ws):
                 return
+            if not self.conns:
+                self._sync_empty_timer_locked()
             if self._loading is not None:
                 connected_players = [n for n in self._loading["players"] if n in self.conns]
                 if len(connected_players) < 2 or all(n in self._loading["ready"] for n in connected_players):
@@ -389,6 +405,8 @@ class Room:
         for name, ws in failed:
             logger.warning("Dropping failed socket for %s in room %s", name, self.code)
             self._close_later(ws, 1011)
+        if failed and not self.conns:
+            self._sync_empty_timer_locked()
         if failed and self.conns and _depth < 2:
             # Báo ngay cho người còn lại biết roster/connected đã cập nhật.
             await self._broadcast_locked(_depth=_depth + 1)
@@ -771,6 +789,11 @@ class Room:
                     self._disconnected_at.pop(clean, None)
                     self.votes.pop(clean, None)
                     self.touch()
+                if not self.conns:
+                    self._delete_now_locked()
+                    if ws is not None:
+                        self._close_later(ws, 1000)
+                    return
                 if self._loading is not None and not is_spec:
                     if clean in self._loading["players"]:
                         self._loading["players"].remove(clean)
@@ -1088,10 +1111,41 @@ class Room:
             task.cancel()
         self._loading_task = None
 
+    def _cancel_empty_timer(self) -> None:
+        task = self._empty_task
+        if task:
+            task.cancel()
+        self._empty_task = None
+
     def _cancel_timers(self) -> None:
         self._cancel_nope_timer()
         self._cancel_turn_timer()
         self._cancel_loading_timer()
+        self._cancel_empty_timer()
+
+    def _sync_empty_timer_locked(self) -> None:
+        if self.conns:
+            self._mark_occupied()
+            return
+        if self._empty_since is None:
+            self._empty_since = time.time()
+        if self._manager is None:
+            return
+        self._cancel_empty_timer()
+        self._empty_seq += 1
+        seq = self._empty_seq
+        deadline = self._empty_since + EMPTY_DISCONNECT_TTL_SECONDS
+        try:
+            asyncio.get_running_loop()
+        except RuntimeError:
+            return
+        self._empty_task = asyncio.create_task(self._empty_room_timer(seq, deadline))
+
+    def _delete_now_locked(self) -> None:
+        self._cancel_timers()
+        self._loading = None
+        if self._manager is not None:
+            self._manager.delete_room(self)
 
     async def _nope_timer(self, game: Game) -> None:
         wait = max(0.0, (game.nope_deadline or 0) - time.time())
@@ -1143,10 +1197,26 @@ class Room:
         except Exception:
             logger.exception("Unhandled error in Loading timer for room %s", self.code)
 
+    async def _empty_room_timer(self, expected_seq: int, deadline: float) -> None:
+        wait = max(0.0, deadline - time.time())
+        await asyncio.sleep(wait)
+        try:
+            async with self._lock:
+                if self._empty_task is asyncio.current_task():
+                    self._empty_task = None
+                if self._empty_seq != expected_seq or self.conns or self._empty_since is None:
+                    return
+                self._delete_now_locked()
+        except Exception:
+            logger.exception("Unhandled error in Empty room timer for room %s", self.code)
+
     def is_idle(self, now: float | None = None) -> bool:
         if self.conns:
             return False
-        idle_for = (now if now is not None else time.time()) - self.last_active
+        moment = now if now is not None else time.time()
+        if self._empty_since is not None:
+            return (moment - self._empty_since) >= EMPTY_DISCONNECT_TTL_SECONDS
+        idle_for = moment - self.last_active
         if self.game is None and self._loading is None:
             return idle_for > EMPTY_LOBBY_TTL_SECONDS
         if self.game is not None and self.game.phase == "ended":
@@ -1173,6 +1243,18 @@ class RoomManager:
         logger.info("Created room %s (total=%d)", code, len(self.rooms))
         return code
 
+    def delete_room(self, room: Room) -> bool:
+        room._cancel_timers()
+        removed = False
+        if self.rooms.get(room.real_code) is room:
+            del self.rooms[room.real_code]
+            removed = True
+        if self.aliases.get(room.display_code) == room.real_code:
+            del self.aliases[room.display_code]
+        if removed:
+            logger.info("Deleted room %s (real=%s)", room.display_code, room.real_code)
+        return removed
+
     def reallocate_room(self, room: Room) -> str:
         """Cấp real_code mới khi rematch, giữ nguyên display_code trong aliases."""
         self.prune()
@@ -1195,11 +1277,7 @@ class RoomManager:
         real = self.aliases.get(upper, upper)
         room = self.rooms.get(real)
         if room is not None and room.is_idle():
-            room._cancel_timers()
-            self.rooms.pop(room.real_code, None)
-            if self.aliases.get(room.display_code) == room.real_code:
-                self.aliases.pop(room.display_code, None)
-            logger.info("Pruned idle room %s on lookup", room.display_code)
+            self.delete_room(room)
             return None
         return room
 
@@ -1209,13 +1287,8 @@ class RoomManager:
 
     def prune(self, now: float | None = None) -> None:
         moment = now if now is not None else time.time()
-        for code in [code for code, room in self.rooms.items() if room.is_idle(moment)]:
-            room = self.rooms.pop(code, None)
-            if room is not None:
-                room._cancel_timers()
-                if self.aliases.get(room.display_code) == room.real_code:
-                    self.aliases.pop(room.display_code, None)
-                logger.info("Pruned idle room %s", code)
+        for room in [r for r in self.rooms.values() if r.is_idle(moment)]:
+            self.delete_room(room)
 
 
 MANAGER = RoomManager()

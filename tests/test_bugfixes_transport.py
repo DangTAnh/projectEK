@@ -1063,3 +1063,72 @@ def test_rematch_reallocates_real_code_and_preserves_display_code():
     mgr.prune()
     assert mgr.get(display_code) is None
     assert display_code not in mgr.aliases
+
+
+def test_explicit_leave_deletes_empty_room_immediately():
+    from fastapi.testclient import TestClient
+    from server.main import app
+    from server.rooms import RoomManager
+
+    mgr = RoomManager()
+    code = mgr.create()
+    room = mgr.get(code)
+    assert room is not None
+
+    async def flow():
+        ws_a = StubSocket()
+        ws_b = StubSocket()
+        tok_a = await room.join("An", ws_a)
+        tok_b = await room.join("Binh", ws_b)
+
+        await room.handle("An", {"action": "leave"}, ws_a, tok_a)
+        assert mgr.get(code) is room
+
+        await room.handle("Binh", {"action": "leave"}, ws_b, tok_b)
+        assert mgr.get(code) is None
+        assert code not in mgr.rooms
+        assert code not in mgr.aliases
+
+    asyncio.run(flow())
+
+    # End-to-end qua HTTP/WS: rời phòng xong không còn trên /api/rooms và /api/rooms/{code} trả 404
+    client = TestClient(app)
+    api_code = client.post("/api/rooms").json()["code"]
+    with client.websocket_connect(f"/ws/{api_code}?name=Solo") as ws:
+        msg = ws.receive_json()
+        assert msg["type"] == "state"
+        ws.send_json({"action": "leave"})
+    assert client.get(f"/api/rooms/{api_code}").status_code == 404
+    assert all(r["code"] != api_code for r in client.get("/api/rooms").json())
+
+
+def test_disconnect_empty_room_deleted_after_grace_and_cancelled_on_reconnect(monkeypatch):
+    import server.rooms as rooms_mod
+    from server.rooms import RoomManager
+
+    monkeypatch.setattr(rooms_mod, "EMPTY_DISCONNECT_TTL_SECONDS", 0.08)
+    mgr = RoomManager()
+    code = mgr.create()
+    room = mgr.get(code)
+    assert room is not None
+
+    async def flow():
+        ws_a = StubSocket()
+        tok_a = await room.join("An", ws_a)
+        await room.handle_disconnect("An", ws_a)
+        assert mgr.get(code) is room
+
+        # Kết nối lại kịp (F5) thì huỷ hẹn giờ xóa phòng
+        ws_a2 = StubSocket()
+        await room.join("An", ws_a2, tok_a)
+        await asyncio.sleep(0.12)
+        assert mgr.get(code) is room
+
+        # Mất kết nối hoàn toàn quá thời gian chờ -> tự xóa phòng
+        await room.handle_disconnect("An", ws_a2)
+        await asyncio.sleep(0.12)
+        assert mgr.get(code) is None
+        assert code not in mgr.rooms
+        assert code not in mgr.aliases
+
+    asyncio.run(flow())
