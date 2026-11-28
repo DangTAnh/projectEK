@@ -23,6 +23,8 @@ def test_rest_rooms_and_cards():
     assert any(r["code"] == code for r in rooms)
     cards = client.get("/api/cards").json()
     assert "feralcat" in cards and cards["skip"]["nopeable"] is True
+    assert cards["curseofthecatbutt"]["variant_names"]["0"] == "Curse of the Cat Butt"
+    assert cards["curseofthecatbutt"]["variant_names"]["1"] == "Blind As A Bat"
 
 
 def test_rest_desks_and_desk_details():

@@ -36,7 +36,7 @@ export default function PlayerList({
         const isConnected = p.connected !== false
         const isTower = !!towerWearer && towerWearer === p.name
         const turnsLeft = isTurn && (turn?.turns_left ?? 1) > 1 ? turn.turns_left : 0
-        const markedName = p.marked ? getCardName(catalog, p.marked.type) : ''
+        const markedName = p.marked ? getCardName(catalog, p.marked.type, p.marked.variant) : ''
         const canEditMe = isMe && typeof onEditAvatar === 'function'
         const nextPlayer = idx < list.length - 1 ? list[idx + 1] : null
         const arrowActive = isPlaying && (

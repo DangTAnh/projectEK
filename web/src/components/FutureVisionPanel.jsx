@@ -130,7 +130,7 @@ function FutureVisionPanel({ cards, peekMeta, open, onToggle, catalog, onInspect
         {cards.map((c, i) => {
           const bomb = isBombType(c?.type)
           const safe = !bomb && isSafeType(c?.type)
-          const cardName = getCardName(catalog, c?.type)
+          const cardName = getCardName(catalog, c?.type, c?.variant)
           const slotClass = [
             'fv-slot',
             i === 0 ? 'is-next' : '',
@@ -186,7 +186,7 @@ export const RevealedFutureStrip = React.memo(function RevealedFutureStrip({
       <div className="fv-strip-row">
         {cards.map((c, i) => {
           const bomb = isBombType(c?.type)
-          const cardName = getCardName(catalog, c?.type)
+          const cardName = getCardName(catalog, c?.type, c?.variant)
           return (
             <React.Fragment key={c?.id || `${c?.type || 'rev'}-${i}`}>
               {i > 0 && <span className="fv-strip-arrow" aria-hidden="true">›</span>}

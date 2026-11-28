@@ -22,7 +22,7 @@ export default function CardView({
   const src = broken === false ? `/static/cards/${card.type}/${variant}.jpg`
     : broken === 'v0' ? `/static/cards/${card.type}/0.jpg`
       : null
-  const displayName = getCardName(catalog, card.type)
+  const displayName = getCardName(catalog, card.type, variant)
   const faceupFlag = card.type === 'implodingkitten' && card.faceup ? ' MẶT LÊN' : ''
   const sizeClass = mini ? 'mini' : small ? 'small' : ''
 

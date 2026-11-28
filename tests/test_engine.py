@@ -580,6 +580,21 @@ class TestPlayerEffects:
         g.respond(cur(g).name, {"position": pos})
         assert g.players[other].marked_id is None
 
+    def test_blind_as_a_bat_variant_display_and_fuzzy_match(self):
+        from server.engine.cards import card_display_name
+
+        assert card_display_name("curseofthecatbutt", 0) == "Curse of the Cat Butt"
+        assert card_display_name("curseofthecatbutt", 1) == "Blind As A Bat"
+        g = make_game(2)
+        first, victim = cur(g).name, g.order[1]
+        assert g._fuzzy_type("Blind As A Bat") == "curseofthecatbutt"
+        give(g, first, "curseofthecatbutt", variant=1)
+        play_type(g, first, "curseofthecatbutt")
+        all_pass(g)
+        g.respond(first, {"player": victim})
+        assert g.players[victim].blind is True
+        assert any("Blind As A Bat" in line for line in g.log)
+
     def test_illtake_intercepts_next_draw(self):
         g = make_game(2)
         first, other = cur(g).name, g.order[1]

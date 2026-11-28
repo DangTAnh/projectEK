@@ -1382,7 +1382,7 @@ export default function Room({ code }) {
                   key={e.card.id}
                   type="button"
                   className={`playmat-card-btn fx-${e.card.type}`}
-                  title={`Xem chi tiết ${getCardName(catalog, e.card.type)}`}
+                  title={`Xem chi tiết ${getCardName(catalog, e.card.type, e.card.variant)}`}
                   onClick={() => setZoom(e.card)}
                 >
                   <CardView small card={e.card} label={e.name !== '-' ? e.name : ''} catalog={catalog} />
@@ -1525,7 +1525,7 @@ export default function Room({ code }) {
             >
               {me.blind
                 ? `Đưa lá úp #${(selectedCardList[0].blind_index ?? 0) + 1}`
-                : `Đưa lá đã chọn (${getCardName(catalog, selectedCardList[0].type)})`}
+                : `Đưa lá đã chọn (${getCardName(catalog, selectedCardList[0].type, selectedCardList[0].variant)})`}
             </button>
             <button type="button" onClick={() => setSelected([])}>Bỏ chọn</button>
           </div>
@@ -1565,7 +1565,7 @@ export default function Room({ code }) {
               onClick={tryPlaySelected}
             >
               {selectedCardList.length === 1
-                ? `Đánh ${getCardName(catalog, selectedCardList[0].type)}`
+                ? `Đánh ${getCardName(catalog, selectedCardList[0].type, selectedCardList[0].variant)}`
                 : comboCheck.valid
                   ? `Đánh combo ${selectedCardList.length} lá`
                   : selectedCardList.length > 3
@@ -1609,7 +1609,7 @@ export default function Room({ code }) {
             )}
             {me.marked && (
               <span className="hand-status-badge mark-badge">
-                <RealIcon name="pin" size={15} /> Bị Mark: {getCardName(catalog, me.marked.type)}
+                <RealIcon name="pin" size={15} /> Bị Mark: {getCardName(catalog, me.marked.type, me.marked.variant)}
               </span>
             )}
           </div>
@@ -1707,7 +1707,7 @@ export default function Room({ code }) {
                 && ANYTIME_TYPES.includes(c.type) && !view.nope_window && !view.pending
               const isMarkedCard = me.marked?.id === c.id
               const dimOnTurn = canDraw && !playableNow && !isSelected && selected.length === 0
-              const cardName = getCardName(catalog, c.type)
+              const cardName = getCardName(catalog, c.type, c.variant)
 
   return (
                 <div
@@ -1835,7 +1835,7 @@ export default function Room({ code }) {
                   onClick={() => setZoom(c)}
                 >
                   <CardView small card={c} catalog={catalog} />
-                  <span>#{view.grave.length - i} · {getCardName(catalog, c.type)}</span>
+                  <span>#{view.grave.length - i} · {getCardName(catalog, c.type, c.variant)}</span>
                 </button>
               ))}
             </div>

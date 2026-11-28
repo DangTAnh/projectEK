@@ -8,7 +8,7 @@ Room đẩy respond() -> cont(payload) -> có thể _ask tiếp (chuỗi quyết
 import copy
 import random
 
-from .cards import CARD_META, GODCAT_BANNED, RESCUE_ORDER, Card
+from .cards import CARD_META, GODCAT_BANNED, RESCUE_ORDER, Card, card_display_name
 from .deck import Deck
 from .player import Player
 
@@ -423,9 +423,11 @@ class Game:
         qb = set(bigrams(q))
         best, best_score = None, 0.0
         for ctype in CARD_META:
-            # thưởng khớp tên hiển thị hoặc type (strip số/nối chữ)
-            name = CARD_META[ctype].get("name", ctype).lower()
-            for cand in (ctype.lower(), name):
+            # thưởng khớp tên hiển thị, tên biến thể (vd: Blind As A Bat) hoặc type
+            meta = CARD_META[ctype]
+            name = meta.get("name", ctype).lower()
+            vnames = [v.lower() for v in (meta.get("variant_names") or {}).values()]
+            for cand in (ctype.lower(), name, *vnames):
                 cb = set(bigrams(cand))
                 inter = len(qb & cb)
                 if not inter:
@@ -563,7 +565,7 @@ class Game:
     def _waste_blind_card(self, p: Player, card: Card) -> None:
         self._leave_hand(p, card)
         self._to_grave(card)
-        self._say(f"{p.name} (bị mù) tự đánh nhầm {CARD_META[card.type]['name']} và vứt vào graveyard!")
+        self._say(f"{p.name} (bị mù) tự đánh nhầm {card_display_name(card)} và vứt vào graveyard!")
 
     def _resolve_blind_card(self, p: Player, card_id: str | None) -> Card:
         self._require(bool(p.hand), "Bạn không còn thẻ nào")
@@ -1040,7 +1042,7 @@ class Game:
             self.nope["actor"], self.nope["card"], self.nope["stack"], self.nope["effect"])
         self._clear_transient(actor=actor_name)
         noped = len(stack) % 2 == 1
-        label = CARD_META.get(card.type, {}).get("name", card.type)
+        label = card_display_name(card)
         self.nope = None
         self.nope_deadline = None
         for c in stack:
@@ -1138,7 +1140,7 @@ class Game:
         p.hand.append(card)
         p.blind = False  # rút thành công không nổ -> khỏi mù
         self._emit_fx("draw", actor=p.name, source=source)
-        self._say(f"Bạn rút {CARD_META[ctype]['name']}", private=p.name)
+        self._say(f"Bạn rút {card_display_name(card)}", private=p.name)
         self._after_one_draw(p, remaining, end_after)
 
     def _after_one_draw(self, p: Player, remaining: int, end_after: bool) -> None:
@@ -1471,8 +1473,9 @@ class Game:
             if not cands:
                 self._say("Không có mục tiêu để Curse.")
                 return
+            label = card_display_name(card) if card.type == "curseofthecatbutt" else card_display_name("curseofthecatbutt")
             self._ask("pick_player", p.name, {"candidates": cands, "reason": "curse"},
-                      lambda r, pl=p: self._do_curse(pl.name, r["player"]))
+                      lambda r, pl=p, lb=label: self._do_curse(pl.name, r["player"], lb))
         elif t == "garbagecollection":
             self._emit_fx("card_fx", actor=p.name, card_type="garbagecollection")
             participants = [p.name] if any(c.type != "godcat" for c in p.hand) else []
@@ -1748,14 +1751,14 @@ class Game:
         card = random.choice(target.hand)
         target.marked_id = card.id
         self._emit_fx("card_fx", actor=p.name, target=target.name, card_type="mark")
-        self._say(f"📌 {target.name} bị Mark: lá {CARD_META[card.type]['name']} lộ diện đến khi played/stolen!")
+        self._say(f"📌 {target.name} bị Mark: lá {card_display_name(card)} lộ diện đến khi played/stolen!")
 
-    def _do_curse(self, actor_name: str, target_name: str) -> None:
+    def _do_curse(self, actor_name: str, target_name: str, card_label: str = "Curse of the Cat Butt") -> None:
         target = self._get(target_name)
         target.blind = True
         random.shuffle(target.hand)
         self._emit_fx("card_fx", actor=actor_name, target=target_name, card_type="curseofthecatbutt")
-        self._say(f"😼 Curse of the Cat Butt: {target_name} bị MÙ — bài bị xáo úp tới khi rút thành công!")
+        self._say(f"😼 {card_label}: {target_name} bị MÙ — bài bị xáo úp tới khi rút thành công!")
 
     def _chain_into_deck(self, names: list[str], then_shuffle: bool,
                          allow_dead: bool = False) -> None:

@@ -202,7 +202,7 @@ export default function PendingPanel({
                 <CardView card={yesNoCard} small catalog={catalog} />
               </button>
               <div className="yesno-card-info">
-                <strong>{getCardName(catalog, yesNoCard.type)}</strong>
+                <strong>{getCardName(catalog, yesNoCard.type, yesNoCard.variant)}</strong>
                 {yesNoMeta?.description && <p className="yesno-desc">{yesNoMeta.description}</p>}
               </div>
             </div>
@@ -375,7 +375,7 @@ function ReorderForm({ cards, catalog, connected, onInspectCard, onDone }) {
         {order.map((id, i) => {
           const c = cards.find((x) => x.id === id)
           if (!c) return null
-          const cardName = getCardName(catalog, c.type)
+          const cardName = getCardName(catalog, c.type, c.variant)
           const isBomb = isBombCard(c)
           return (
             <React.Fragment key={id}>

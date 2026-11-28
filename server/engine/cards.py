@@ -76,8 +76,16 @@ CARD_META = {
     "illtakethat": {"name": "I'll Take That", "is_action": True, "nopeable": False,
                     "needs_target": True},
     "mark": {"name": "Mark", "is_action": True, "nopeable": True, "needs_target": True},
-    "curseofthecatbutt": {"name": "Curse of the Cat Butt", "is_action": True, "nopeable": True,
-                          "needs_target": True},
+    "curseofthecatbutt": {
+        "name": "Curse of the Cat Butt",
+        "variant_names": {
+            "0": "Curse of the Cat Butt",
+            "1": "Blind As A Bat",
+        },
+        "is_action": True,
+        "nopeable": True,
+        "needs_target": True,
+    },
     "garbagecollection": {"name": "Garbage Collection", "is_action": True, "nopeable": True},
     "graverobber": {"name": "Grave Robber", "is_action": True, "nopeable": True,
                     "needs_dead": True},
@@ -96,3 +104,20 @@ GODCAT_BANNED = {"nope", "explodingkitten", "implodingkitten", "streakingkitten"
 
 # Thứ tự cứu khi rút bom
 RESCUE_ORDER = ["defuse", "streakingkitten", "zombiekitten", "godcat"]
+
+
+def card_display_name(card_or_type: Card | str, variant: int | None = None) -> str:
+    """Tên hiển thị của thẻ — ưu tiên tên theo biến thể (vd: Blind As A Bat ở variant 1)."""
+    if isinstance(card_or_type, Card):
+        ctype = card_or_type.type
+        var = card_or_type.variant if variant is None else variant
+    else:
+        ctype = card_or_type
+        var = variant
+    meta = CARD_META.get(ctype, {})
+    vnames = meta.get("variant_names")
+    if isinstance(vnames, dict) and var is not None:
+        vname = vnames.get(str(var)) or vnames.get(var)
+        if vname:
+            return vname
+    return meta.get("name", ctype)
