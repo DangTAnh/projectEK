@@ -690,13 +690,13 @@ button.leave:hover:not(:disabled) {
 /* ─────────────── LOBBY ─────────────── */
 .lobby-stage {
   flex: 1 1 auto; min-height: 0;
-  display: flex; align-items: center; justify-content: center;
-  overflow: hidden; padding: 10px 8px;
+  display: flex; align-items: flex-start; justify-content: center;
+  overflow: hidden; padding: 14px 8px 10px;
 }
 .lobby-panel {
-  max-width: 1220px; width: 100%;
-  height: min(555px, calc(100dvh - 88px));
-  max-height: calc(100dvh - 88px);
+  width: 90%; max-width: none;
+  height: min(560px, calc(100dvh - 96px));
+  max-height: calc(100dvh - 96px);
   padding: 18px 22px;
   background: var(--surface);
   border: 1px solid var(--line-strong);
@@ -2318,7 +2318,7 @@ button.leave:hover:not(:disabled) {
   button.leave { padding: 6px 10px; font-size: 12.5px; }
 
   .lobby-stage { overflow-y: auto; align-items: flex-start; padding: 12px 4px; }
-  .lobby-panel { height: auto; max-height: none; padding: 16px; gap: 14px; }
+  .lobby-panel { width: 100%; height: auto; max-height: none; padding: 16px; gap: 14px; }
   .lobby-body { flex: none; grid-template-columns: 1fr; gap: 14px; }
   .lobby-side {
     padding-right: 0; border-right: none;
