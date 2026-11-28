@@ -1538,9 +1538,11 @@ export default function Room({ code }) {
                 setSelected([])
               }}
             >
-              {me.blind
-                ? `Đưa lá úp #${(selectedCardList[0].blind_index ?? 0) + 1}`
-                : `Đưa lá đã chọn (${getCardName(catalog, selectedCardList[0].type, selectedCardList[0].variant)})`}
+              {myPending?.data?.reason === 'blind_defuse'
+                ? `Thử lật lá úp #${(selectedCardList[0].blind_index ?? 0) + 1}`
+                : me.blind
+                  ? `Đưa lá úp #${(selectedCardList[0].blind_index ?? 0) + 1}`
+                  : `Đưa lá đã chọn (${getCardName(catalog, selectedCardList[0].type, selectedCardList[0].variant)})`}
             </button>
             <button type="button" onClick={() => setSelected([])}>Bỏ chọn</button>
           </div>

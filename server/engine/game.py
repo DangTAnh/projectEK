@@ -18,6 +18,10 @@ TURN_ENDING_TYPES = {
     "attackofthedead", "drawfromthebottom", "digdeeper", "raisingheck",
     "bury", "catomicbomb", "armageddon",
 }
+BLIND_BOMB_FATAL_TYPES = {
+    "skip", "superskip", "reverse",
+    "attack2x", "targetattack2x", "attackofthedead",
+}
 LOG_BUFFER_MAX = 300
 
 
@@ -250,6 +254,26 @@ class Game:
 
     def _receive_bomb(self, p: Player, bomb: Card, start: int = 0) -> None:
         label = CARD_META[bomb.type]["name"]
+        if p.blind and start == 0:
+            if p.standby_defuse:
+                used = self._consume_defuse(p)
+                p.blind = False
+                self._emit_fx("defuse", actor=p.name, card_type="defuse")
+                self._say(f"{p.name} dùng {used} cho {label} nhận được và hết mù!")
+                self._ask(
+                    "pick_index", p.name,
+                    {"reason": "defuse_receive", "min": 0, "max": self.deck.size(), "card": bomb.to_dict()},
+                    lambda r, pl=p, b=bomb: self._finish_receive_insert(pl, b, r),
+                )
+                return
+            if (bomb.type == "explodingkitten"
+                    and p.has_type("streakingkitten")
+                    and not p.has_type("explodingkitten")):
+                self._streaking_keep_received(p, bomb)
+                return
+            self._say(f"💥 {p.name} (bị mù) nhận phải {label} — phải đánh bừa bài trên tay để tìm Defuse!")
+            self._ask_blind_bomb_pick(p, [bomb], remaining=0, end_after=False)
+            return
         for i in range(start, len(RESCUE_ORDER)):
             t = RESCUE_ORDER[i]
             has_rescue = self._has_defuse(p) if t == "defuse" else p.has_type(t)
@@ -599,6 +623,11 @@ class Game:
             self._require(card is not None, "Không có thẻ này trên tay")
         meta = self._meta(card.type)
         if p.blind:
+            if card.type == "explodingkitten":
+                self._leave_hand(p, card)
+                self._say(f"💥 {name} (bị mù) tự đánh trúng Exploding Kitten trên tay — phải tìm Defuse!")
+                self._handle_bomb(p, card, remaining=1, end_after=False, allow_streaking=False)
+                return
             mat_types = {e["card"]["type"] for e in self.playmat}
             has_dead = any(not self.players[n2].alive for n2 in self.order)
             unplayable_blind = (
@@ -1193,13 +1222,33 @@ class Game:
         )
 
     def _handle_bomb(self, p: Player, bomb: Card, remaining: int, end_after: bool,
-                     start: int = 0) -> None:
+                     start: int = 0, allow_streaking: bool = True) -> None:
         label = CARD_META[bomb.type]["name"]
         # Imploding Kitten MẶT NGỬA: nổ ngay, không Defuse/Streaking/Zombie/Godcat cứu được
         if bomb.type == "implodingkitten" and bomb.faceup:
             self._say(f"😼 {p.name} rút phải Imploding Kitten MẶT NGỬA — nổ ngay, không cứu được!")
             self._kill(p, bomb=bomb)
             self._after_one_draw(p, remaining, end_after)
+            return
+        if p.blind and start == 0:
+            # Defuse dự phòng (Godcat đặt công khai trên bàn) vẫn dùng được ngay
+            if p.standby_defuse:
+                used = self._consume_defuse(p)
+                p.blind = False
+                self._emit_fx("defuse", actor=p.name, card_type="defuse")
+                self._say(f"{p.name} dùng {used} cho {label} và hết mù!")
+                self._ask_pick_insert(p, bomb, "defuse", remaining, end_after)
+                return
+            # Streaking Kitten trên tay bảo vệ thụ động cho lá Exploding Kitten đầu tiên
+            if (allow_streaking
+                    and bomb.type == "explodingkitten"
+                    and p.has_type("streakingkitten")
+                    and not p.has_type("explodingkitten")):
+                p.blind = False
+                self._streaking_keep(p, bomb, remaining, end_after)
+                return
+            self._say(f"💥 {p.name} (bị mù) bốc phải {label} — phải chọn bừa lá úp trên tay để tìm Defuse!")
+            self._ask_blind_bomb_pick(p, [bomb], remaining, end_after)
             return
         for i in range(start, len(RESCUE_ORDER)):
             t = RESCUE_ORDER[i]
@@ -1250,6 +1299,150 @@ class Game:
                 return
         self._kill(p, bomb=bomb)
         self._after_one_draw(p, remaining, end_after)
+
+    def _ask_blind_bomb_pick(
+        self,
+        p: Player,
+        bombs: list[Card],
+        remaining: int,
+        end_after: bool,
+        last_wasted: str | None = None,
+    ) -> None:
+        """Người chơi đang blind bốc phải bom: phải lật bừa từng lá úp cho tới khi trúng Defuse hoặc nổ."""
+        bomb = bombs[0]
+        rest = bombs[1:]
+        if not p.hand:
+            for extra in rest:
+                self._to_grave(extra)
+            self._say(f"💥 {p.name} (bị mù) hết bài trên tay mà chưa tìm thấy Defuse — nổ tung!")
+            self._kill(p, bomb=bomb)
+            self._after_one_draw(p, remaining, end_after)
+            return
+        data: dict = {
+            "source": "own_hand",
+            "reason": "blind_defuse",
+            "card": bomb.to_dict(),
+            "remaining_bombs": len(bombs),
+        }
+        if last_wasted:
+            data["last_wasted"] = last_wasted
+        self._ask(
+            "pick_card",
+            p.name,
+            data,
+            lambda r, pl=p, bs=list(bombs), rem=remaining, ea=end_after: self._blind_bomb_pick(
+                pl, bs, r.get("card_id", ""), rem, ea
+            ),
+        )
+
+    def _blind_bomb_pick(
+        self,
+        p: Player,
+        bombs: list[Card],
+        card_id: str,
+        remaining: int,
+        end_after: bool,
+    ) -> None:
+        bomb = bombs[0]
+        next_bombs = list(bombs[1:])
+        chosen = p.find(card_id)
+        self._require(chosen is not None, "Thẻ không có trong tay bạn")
+
+        # Gỡ khỏi tay trực tiếp (tự xử lý Streaking Kitten để không đè self.pending bằng đệ quy)
+        p.hand.remove(chosen)
+        if p.marked_id == chosen.id:
+            p.marked_id = None
+        if chosen.type == "streakingkitten":
+            carried = next((c for c in p.hand if c.type == "explodingkitten"), None)
+            if carried is not None:
+                p.hand.remove(carried)
+                if p.marked_id == carried.id:
+                    p.marked_id = None
+                next_bombs.append(carried)
+                self._say(f"💥 {p.name} (bị mù) bỏ trúng Streaking Kitten — Exploding Kitten trên tay cũng phát nổ!")
+
+        label = CARD_META[bomb.type]["name"]
+        chosen_name = card_display_name(chosen)
+
+        # 1. Trúng lá cứu bom hợp lệ (Defuse / Zombie Kitten / Godcat)
+        if chosen.type in ("defuse", "zombiekitten", "godcat"):
+            if not next_bombs:
+                p.blind = False
+            unblind_suffix = " và hết mù" if not next_bombs else ""
+            after_insert = (
+                (lambda pl, rem, ea, nb=next_bombs: self._ask_blind_bomb_pick(pl, nb, rem, ea))
+                if next_bombs
+                else None
+            )
+            if chosen.type == "defuse":
+                self._to_grave(chosen)
+                self._emit_fx("defuse", actor=p.name, card_type="defuse")
+                self._say(f"🛡️ {p.name} (bị mù) đánh trúng Defuse — cứu sống khỏi {label}{unblind_suffix}!")
+                self._ask(
+                    "pick_index", p.name,
+                    {"reason": "defuse", "min": 0, "max": self.deck.size(), "card": bomb.to_dict()},
+                    lambda r, b=bomb, pl=p, rem=remaining, ea=end_after, nxt=after_insert: (
+                        self._finish_insert(pl, b, r, rem, ea, then=nxt)
+                    ),
+                )
+                return
+            if chosen.type == "zombiekitten":
+                self._to_grave(chosen)
+                self._emit_fx("defuse", actor=p.name, card_type="zombiekitten")
+                self._say(f"🧟 {p.name} (bị mù) đánh trúng Zombie Kitten — cứu sống khỏi {label}{unblind_suffix}!")
+
+                def after_zombie_insert(pl: Player, rem: int, ea: bool, nb=next_bombs) -> None:
+                    if not nb:
+                        self._zombie_revive(pl, rem, ea)
+                        return
+                    self._zombie_revive(pl, 0, False)
+                    if self.phase == "playing":
+                        self._after_quiesce(lambda: self._ask_blind_bomb_pick(pl, nb, rem, ea))
+
+                self._ask(
+                    "pick_index", p.name,
+                    {"reason": "zombie", "min": 0, "max": self.deck.size(), "card": bomb.to_dict()},
+                    lambda r, b=bomb, pl=p, rem=remaining, ea=end_after: (
+                        self._finish_insert(pl, b, r, rem, ea, then=after_zombie_insert)
+                    ),
+                )
+                return
+            # godcat
+            self.playmat.append({"name": p.name, "card": chosen.to_dict()})
+            self._emit_fx("defuse", actor=p.name, card_type="godcat")
+            self._say(f"✨ {p.name} (bị mù) đánh trúng Godcat như Defuse — cứu sống khỏi {label}{unblind_suffix}!")
+            self._ask(
+                "pick_index", p.name,
+                {"reason": "godcat_defuse", "min": 0, "max": self.deck.size(), "card": bomb.to_dict()},
+                lambda r, b=bomb, pl=p, rem=remaining, ea=end_after, nxt=after_insert: (
+                    self._finish_insert(pl, b, r, rem, ea, then=nxt)
+                ),
+            )
+            return
+
+        # 2. Trúng lá bỏ lượt (Skip, Super Skip, Reverse, Attack...) -> nổ ngay và bị loại
+        if chosen.type in BLIND_BOMB_FATAL_TYPES:
+            self._to_grave(chosen)
+            for extra in next_bombs:
+                self._to_grave(extra)
+            self._say(f"💥 {p.name} (bị mù) đánh trúng {chosen_name} (lá bỏ lượt) khi đang gỡ bom — nổ tung!")
+            self._kill(p, bomb=bomb)
+            self._after_one_draw(p, remaining, end_after)
+            return
+
+        # 3. Trúng thêm Exploding Kitten trên tay -> phải gỡ cả 2 quả bom
+        if chosen.type == "explodingkitten":
+            next_bombs.append(chosen)
+            self._say(
+                f"💥 {p.name} (bị mù) lại lật trúng {chosen_name} trên tay — phải tìm Defuse cho cả {len(next_bombs) + 1} quả bom!"
+            )
+            self._ask_blind_bomb_pick(p, [bomb, *next_bombs], remaining, end_after, last_wasted=chosen_name)
+            return
+
+        # 4. Lá khác -> bỏ vào graveyard (mất hiệu lực), tiếp tục chọn bừa
+        self._to_grave(chosen)
+        self._say(f"🙈 {p.name} (bị mù) đánh trượt trúng {chosen_name} — mất hiệu lực, tiếp tục tìm Defuse!")
+        self._ask_blind_bomb_pick(p, [bomb, *next_bombs], remaining, end_after, last_wasted=chosen_name)
 
     def _ask_pick_insert(self, p: Player, bomb: Card, reason: str,
                          remaining: int, end_after: bool) -> None:

@@ -26,6 +26,7 @@ const REASON_TEXT = {
   potluck: 'Chọn 1 thẻ đặt lên đỉnh deck (Potluck)',
   into_deck: 'Chọn 1 thẻ cài lén vào deck',
   feedthedead: 'Chọn 1 thẻ dâng cho người hồi sinh',
+  blind_defuse: 'Đang bị MÙ và rút phải bom — chọn bừa lá úp trên tay để tìm Defuse!',
 }
 
 export default function PendingPanel({
@@ -75,7 +76,11 @@ export default function PendingPanel({
   return (
     <div className="pending-panel" role="dialog" aria-live="polite" aria-label="Lượt quyết định của bạn">
       <div className="pend-eyebrow">
-        {kind === 'reorder' ? 'ALTER THE FUTURE' : isBombInsert ? 'DEFUSE BOMB' : 'ACTION REQUIRED'}
+        {kind === 'reorder'
+          ? 'ALTER THE FUTURE'
+          : (isBombInsert || data.reason === 'blind_defuse')
+            ? 'DEFUSE BOMB'
+            : 'ACTION REQUIRED'}
       </div>
       <h3>Đến lượt quyết định của bạn</h3>
 
@@ -279,10 +284,35 @@ export default function PendingPanel({
       {kind === 'pick_card' && data.source === 'own_hand' && (
         <div className={`handout-zone ${isBlind ? 'is-blind' : ''}`}>
           <div id="handout-drop" className={`handout-drop ${overHo ? 'over' : ''}`}>
-            <img src="/handout.png" alt="" className="handout-img" draggable={false} />
+            {data.reason === 'blind_defuse' && data.card ? (
+              <button
+                type="button"
+                className="pend-card-btn"
+                title="Bấm để xem chi tiết lá bom"
+                onClick={() => onInspectCard?.(data.card)}
+              >
+                <CardView card={data.card} small catalog={catalog} />
+              </button>
+            ) : (
+              <img src="/handout.png" alt="" className="handout-img" draggable={false} />
+            )}
           </div>
           <div className="handout-text">
-            {isBlind ? (
+            {data.reason === 'blind_defuse' ? (
+              <>
+                <p className="handout-hint">
+                  <RealIcon name="bomb" size={18} /> Bạn đang bị MÙ và rút phải <b>{getCardName(catalog, data.card?.type || 'explodingkitten', data.card?.variant)}</b>! Hãy lật bừa 1 lá úp để tìm Defuse.
+                </p>
+                {data.last_wasted && (
+                  <p className="handout-sub">
+                    Vừa đánh trượt: <b>{data.last_wasted}</b> (mất hiệu lực) — hãy chọn tiếp lá úp khác!
+                  </p>
+                )}
+                <p className="handout-sub">
+                  Trúng Defuse/Zombie/Godcat sẽ cứu sống và gỡ mù · Trúng lá bỏ lượt (Skip/Super Skip/Reverse/Attack) sẽ nổ ngay · Kéo thả lá úp vào đây hoặc bấm chọn rồi bấm “Thử lật lá úp”.
+                </p>
+              </>
+            ) : isBlind ? (
               <>
                 <p className="handout-hint">
                   <RealIcon name="blind" size={18} /> Bạn đang bị mù! Hãy tự chọn hoặc kéo 1 lá úp bất kỳ

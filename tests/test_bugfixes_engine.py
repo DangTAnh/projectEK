@@ -898,6 +898,31 @@ def test_blind_manual_respond_favor_and_potluck_godcat_guard():
     assert any(c.id == rv3.id for c in g3.deck.cards)
 
 
+def test_blind_play_exploding_kitten_from_hand_triggers_blind_defuse():
+    g = make_game(3)
+    first = cur(g).name
+    p = g.players[first]
+    p.blind = True
+    ek = Card(id="explodingkitten.0.hand", type="explodingkitten", variant=0)
+    sk = Card(id="streakingkitten.0.hand", type="streakingkitten", variant=0)
+    df = Card(id="defuse.0.hand", type="defuse", variant=0)
+    p.hand = [ek, sk, df]
+
+    g.play_card(first, "blind.0")
+    assert g.pending is not None
+    assert g.pending["kind"] == "pick_card"
+    assert g.pending["data"]["reason"] == "blind_defuse"
+    assert p.blind is True
+
+    # Chọn trúng defuse ở blind.1 -> cứu sống, gỡ mù và cho chèn lại bom
+    g.respond(first, {"card_id": "blind.1"})
+    assert p.alive is True and p.blind is False
+    assert g.pending["kind"] == "pick_index"
+    g.respond(first, {"index": 0})
+    assert g.pending is None
+    assert g.deck.peek(1)[0].id == ek.id
+
+
 def test_fx_events_seq_monotone_and_view_cap():
     g = make_game(2)
     first, other = g.order[0], g.order[1]

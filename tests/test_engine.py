@@ -5,7 +5,7 @@ import random
 import pytest
 
 from server.engine import Game, GameError
-from server.engine.cards import CARD_META
+from server.engine.cards import CARD_META, Card
 from server.engine.deck import Deck
 
 # ---------- helpers ----------
@@ -556,6 +556,94 @@ class TestPlayerEffects:
         assert cur(g).blind
         g.draw(other)  # rút thành công -> khỏi mù
         assert not g.players[other].blind
+
+    def test_blind_draw_bomb_must_pick_blindly_until_defuse(self):
+        g = make_game(3)
+        first = cur(g).name
+        p = g.players[first]
+        p.blind = True
+        cat = Card(id="cat.0.bd1", type="cat", variant=0)
+        df = Card(id="defuse.0.bd2", type="defuse", variant=0)
+        p.hand = [cat, df]
+        bomb = g.debug_put_deck("explodingkitten", index=0)
+
+        g.draw(first)
+        # Không được tự động defuse: phải mở pending chọn lá úp
+        assert g.pending is not None
+        assert g.pending["kind"] == "pick_card"
+        assert g.pending["owner"] == first
+        assert g.pending["data"]["source"] == "own_hand"
+        assert g.pending["data"]["reason"] == "blind_defuse"
+        assert p.blind is True
+        assert p.alive is True
+
+        # Chọn trượt trúng Cat -> bỏ xuống grave, mất hiệu lực, tiếp tục chọn
+        g.respond(first, {"card_id": "blind.0"})
+        assert cat in g.grave
+        assert p.alive is True and p.blind is True
+        assert g.pending["kind"] == "pick_card"
+        assert g.pending["data"]["reason"] == "blind_defuse"
+        assert g.pending["data"]["last_wasted"] == "Cat"
+
+        # Chọn trúng Defuse (giờ ở blind.0) -> cứu sống, gỡ blind, cho chọn vị trí chèn bom
+        g.respond(first, {"card_id": "blind.0"})
+        assert df in g.grave
+        assert p.alive is True
+        assert p.blind is False
+        assert g.pending["kind"] == "pick_index"
+        assert g.pending["data"]["reason"] == "defuse"
+        g.respond(first, {"index": 0})
+        assert g.pending is None
+        assert g.deck.peek(1)[0].id == bomb.id
+
+    def test_blind_draw_bomb_picking_skip_or_superskip_explodes_immediately(self):
+        for fatal_type in ("skip", "superskip"):
+            g = make_game(3)
+            first = cur(g).name
+            p = g.players[first]
+            p.blind = True
+            fatal = Card(id=f"{fatal_type}.0.bd", type=fatal_type, variant=0)
+            df = Card(id="defuse.0.bd", type="defuse", variant=0)
+            p.hand = [fatal, df]
+            g.debug_put_deck("explodingkitten", index=0)
+
+            g.draw(first)
+            assert g.pending["data"]["reason"] == "blind_defuse"
+            g.respond(first, {"card_id": "blind.0"})
+            assert p.alive is False
+            assert fatal in g.grave
+            assert g.pending is None
+
+    def test_blind_draw_bomb_running_out_of_cards_explodes(self):
+        g = make_game(3)
+        first = cur(g).name
+        p = g.players[first]
+        p.blind = True
+        cat = Card(id="cat.0.empty", type="cat", variant=0)
+        p.hand = [cat]
+        g.debug_put_deck("explodingkitten", index=0)
+
+        g.draw(first)
+        assert g.pending["data"]["reason"] == "blind_defuse"
+        g.respond(first, {"card_id": "blind.0"})
+        assert cat in g.grave
+        assert p.alive is False
+        assert g.pending is None
+
+    def test_blind_draw_bomb_protected_by_streaking_kitten(self):
+        g = make_game(3)
+        first = cur(g).name
+        p = g.players[first]
+        p.blind = True
+        sk = Card(id="streakingkitten.0.bd", type="streakingkitten", variant=0)
+        p.hand = [sk]
+        bomb = g.debug_put_deck("explodingkitten", index=0)
+
+        g.draw(first)
+        assert p.alive is True
+        assert p.blind is False
+        assert bomb in p.hand
+        assert g.pending is None
 
     def test_mark_reveals_one_card(self):
         g = make_game(2)
