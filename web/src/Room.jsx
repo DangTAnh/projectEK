@@ -812,10 +812,14 @@ export default function Room({ code }) {
   )
   const comboCheck = useMemo(() => validateCombo(me?.blind ? [] : selectedCardList), [me?.blind, selectedCardList])
 
+  const canClairvoyance = Boolean(me?.can_clairvoyance)
+  const hasClairvoyanceInHand = !me?.blind && (me?.hand || []).some((c) => c.type === 'clairvoyance')
+
   const canPlay = useCallback((card) => (
     connected && isMyTurn && !view?.pending && !view?.nope_window
       && card.type !== 'nope' && !UNPLAYABLE_TYPES.includes(card.type)
-  ), [connected, isMyTurn, view?.pending, view?.nope_window])
+      && (card.type !== 'clairvoyance' || canClairvoyance)
+  ), [connected, isMyTurn, view?.pending, view?.nope_window, canClairvoyance])
 
   const playOne = useCallback((card, forceNow = false) => {
     if (!connected) {
@@ -1055,6 +1059,9 @@ export default function Room({ code }) {
     if (!connected) return false
     if (givePending) return false
     if (me.blind) return canDraw
+    if (card.type === 'clairvoyance') {
+      return canClairvoyance && !view.nope_window
+    }
     return canPlay(card)
       || (me.alive && ANYTIME_TYPES.includes(card.type) && !view.nope_window && !view.pending)
   }
@@ -1192,7 +1199,11 @@ export default function Room({ code }) {
   const isOracleOpen = Boolean((me.peek?.length > 0 && peekOpen) || (myPending && view.pending?.kind === 'reorder'))
   const isUnderAttack = Boolean(isMyTurn && turnsLeft > 1)
 
-  const isDeadLocked = !me.alive && !(givePending && myPending?.data?.reason === 'into_deck')
+  const hasDeadAnytime = !me.alive && !me.blind && (me.hand || []).some(
+    (c) => (c.type === 'clairvoyance' && canClairvoyance && !view.nope_window)
+      || (c.type === 'feedthedead' && !view.pending && !view.nope_window),
+  )
+  const isDeadLocked = !me.alive && !(givePending && myPending?.data?.reason === 'into_deck') && !hasDeadAnytime
 
   return (
     <div className={`room ${shake ? 'shake' : ''}`}>
@@ -1520,6 +1531,7 @@ export default function Room({ code }) {
         connected={connected}
         overHo={!!drag?.overHo}
         isBlind={!!me.blind}
+        canClairvoyance={canClairvoyance && hasClairvoyanceInHand}
         catalog={catalog}
         peekCards={me.peek}
         onInspectCard={setZoom}
@@ -1719,9 +1731,11 @@ export default function Room({ code }) {
                 : (n > 12 ? 0.6 : n > 9 ? 1.0 : n > 6 ? 1.5 : 2.1)
               const isSelected = selected.includes(c.id)
               const playableNow = canPlay(c)
-              const anytimeOffTurn = connected && !isMyTurn
-                && (me.alive || c.type === 'clairvoyance' || c.type === 'feedthedead')
-                && ANYTIME_TYPES.includes(c.type) && !view.nope_window && !view.pending
+              const anytimeOffTurn = connected && !view.nope_window && (
+                c.type === 'clairvoyance'
+                  ? (canClairvoyance && !playableNow)
+                  : (!isMyTurn && !view.pending && (me.alive || c.type === 'feedthedead') && ANYTIME_TYPES.includes(c.type))
+              )
               const isMarkedCard = me.marked?.id === c.id
               const dimOnTurn = canDraw && !playableNow && !isSelected && selected.length === 0
               const cardName = getCardName(catalog, c.type, c.variant)

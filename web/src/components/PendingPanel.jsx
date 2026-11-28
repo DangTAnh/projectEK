@@ -36,6 +36,7 @@ export default function PendingPanel({
   connected = true,
   overHo = false,
   isBlind = false,
+  canClairvoyance = false,
   catalog = null,
   peekCards = [],
   onInspectCard = null,
@@ -55,6 +56,11 @@ export default function PendingPanel({
     return (
       <div className="pending-panel waiting" role="status" aria-live="polite">
         <h3><RealIcon name="hourglass" size={18} /> {pending.owner} đang quyết định…</h3>
+        {canClairvoyance && (
+          <p className="handout-sub">
+            🔮 Bạn có <b>Clairvoyance</b> — bấm <b>NOW</b> trên lá Clairvoyance để nhìn lén vị trí đặt bom!
+          </p>
+        )}
       </div>
     )
   }

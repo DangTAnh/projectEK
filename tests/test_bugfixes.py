@@ -365,16 +365,22 @@ def test_godcat_anytime_preserves_current_turn():
 
 
 def test_dead_player_anytime_limits():
-    g = make_game(2)
+    g = make_game(3)
     first, other = g.order[0], g.order[1]
     g.players[other].alive = False
     give(g, other, "shufflenow")
     with pytest.raises(GameError):
         g.play_now(other, hand_ids(g, other)[-1])
-    give(g, other, "clairvoyance")
-    g.play_now(other, hand_ids(g, other)[-1])
+    # Người chết vẫn đánh được Clairvoyance khi người khác đang Defuse đặt bom vào deck
+    give(g, first, "defuse")
+    g.debug_put_deck("explodingkitten", index=0)
+    g.draw(first)
+    assert g.pending is not None and g.pending["kind"] == "pick_index"
+    cv = give(g, other, "clairvoyance")
+    g.play_now(other, cv.id)
     all_pass(g)
-    assert other in g.bomb_watchers
+    g.respond(first, {"index": 1})
+    assert g.view(other)["you"]["bomb_positions"] == [2]
 
 
 def test_godcat_standby_defuse():

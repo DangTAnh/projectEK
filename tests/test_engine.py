@@ -386,17 +386,88 @@ class TestFutureCards:
         assert "peek" not in g.view(dead_name)["you"]
 
     def test_clairvoyance_bomb_positions(self):
-        g = make_game(2)
-        first = cur(g).name
-        give(g, first, "clairvoyance")
-        g.play_now(first, find_hand(g, first, "clairvoyance").id)
-        if g.nope is not None:
-            all_pass(g)
-        v = g.view("P1")
-        assert "bomb_positions" not in v["you"]
-        v = g.view(first)
-        pos = v["you"]["bomb_positions"]
-        assert isinstance(pos, list)
+        g = make_game(3)
+        first, watcher, third = g.order[0], g.order[1], g.order[2]
+        # Chưa có ai Defuse / Zombie Kitten đặt bom -> không đánh được Clairvoyance
+        cv = give(g, watcher, "clairvoyance")
+        assert g.view(watcher)["you"]["can_clairvoyance"] is False
+        with pytest.raises(GameError):
+            g.play_now(watcher, cv.id)
+
+        # Đặt sẵn 1 bom khác sâu trong deck (không được lộ bởi Clairvoyance cho quả bom kia)
+        other_bomb = g.debug_put_deck("explodingkitten", index=8)
+        # Người chơi first rút phải Exploding Kitten và Defuse -> mở pending pick_index
+        give(g, first, "defuse")
+        defused_bomb = g.debug_put_deck("explodingkitten", index=0)
+        g.draw(first)
+        assert g.pending is not None and g.pending["kind"] == "pick_index"
+        assert g.pending["owner"] == first
+        assert g.view(watcher)["you"]["can_clairvoyance"] is True
+        assert g.view(first)["you"]["can_clairvoyance"] is False
+
+        # Watcher đánh Clairvoyance ngay lúc first đang chọn vị trí chèn bom
+        g.play_now(watcher, cv.id)
+        assert g.nope is not None
+        # Khi cửa sổ Nope đang mở, first chưa được chốt respond
+        with pytest.raises(GameError):
+            g.respond(first, {"index": 2})
+        all_pass(g)
+
+        # First chèn bom vào index 2 (vị trí #3 từ đỉnh deck)
+        g.respond(first, {"index": 2})
+        assert g.pending is None
+        # Chỉ watcher thấy ĐÚNG vị trí #3 của quả bom vừa đặt (KHÔNG lộ other_bomb!)
+        v_watcher = g.view(watcher)
+        assert v_watcher["you"]["bomb_positions"] == [3]
+        assert any("#3" in line and "Clairvoyance" in line for line in v_watcher["log"])
+        # Người thứ 3 không thấy bomb_positions và log công khai không lộ vị trí chèn
+        v_third = g.view(third)
+        assert "bomb_positions" not in v_third["you"]
+        assert not any("#3" in line for line in v_third["log"])
+
+        # Third vẫn có thể dùng Clairvoyance ngay sau khi first vừa đặt xong (trước khi xáo deck)
+        cv3 = give(g, third, "clairvoyance")
+        assert g.view(third)["you"]["can_clairvoyance"] is True
+        g.play_now(third, cv3.id)
+        all_pass(g)
+        assert g.view(third)["you"]["bomb_positions"] == [3]
+        assert other_bomb.id not in g.clairvoyance_targets[third]
+        assert defused_bomb.id in g.clairvoyance_targets[third]
+
+        # Xáo deck -> vị trí bom đã soi không còn hợp lệ nên phải xóa
+        shuf = give(g, cur(g).name, "shufflenow")
+        g.play_now(cur(g).name, shuf.id)
+        all_pass(g)
+        assert "bomb_positions" not in g.view(watcher)["you"]
+        assert "bomb_positions" not in g.view(third)["you"]
+
+    def test_clairvoyance_zombie_kitten_and_nope_blocks_watching(self):
+        g = make_game(3)
+        first, watcher, dead = g.order[0], g.order[1], g.order[2]
+        g.players[dead].alive = False
+        # Loại Defuse khỏi tay first để first dùng Zombie Kitten
+        g.players[first].hand = [c for c in g.players[first].hand if c.type != "defuse"]
+        give(g, first, "zombiekitten")
+        give(g, first, "nope")
+        g.debug_put_deck("explodingkitten", index=0)
+
+        g.draw(first)
+        assert g.pending["kind"] == "yes_no"
+        g.respond(first, {"value": True})
+        assert g.pending["kind"] == "pick_index"
+        assert g.pending["data"]["reason"] == "zombie"
+        assert g.view(watcher)["you"]["can_clairvoyance"] is True
+
+        # Watcher đánh Clairvoyance nhưng bị first chặn bằng Nope -> không thấy vị trí bom
+        cv = give(g, watcher, "clairvoyance")
+        g.play_now(watcher, cv.id)
+        g.stack_nope(first)
+        g.pass_nope(watcher)
+        g.resolve_nope()
+
+        g.respond(first, {"index": 0})
+        g.respond(first, {"player": dead})  # hồi sinh dead
+        assert "bomb_positions" not in g.view(watcher)["you"]
 
     def test_digdeeper_keep(self):
         g = make_game(2)
